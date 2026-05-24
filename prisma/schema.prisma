@@ -1,0 +1,249 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  ANALYST
+  VIEWER
+}
+
+enum SubscriptionPlan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  TRIALING
+  INCOMPLETE
+}
+
+enum NotificationType {
+  WEEKLY_DIGEST
+  OVERSPENDING_ALERT
+  OPTIMIZATION_REMINDER
+  REPORT_READY
+}
+
+model User {
+  id               String             @id @default(cuid())
+  email            String             @unique
+  emailVerified    DateTime?
+  name             String?
+  image            String?
+  currency         String             @default("USD")
+  teamSize         Int                @default(1)
+  organizationId   String?
+  organization     Organization?      @relation(fields: [organizationId], references: [id])
+  role             UserRole           @default(ANALYST)
+  subscriptionId   String?            @unique
+  subscription     Subscription?      @relation(fields: [subscriptionId], references: [id])
+  onboarded        Boolean            @default(false)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  accounts         Account[]
+  sessions         Session[]
+  audits           Audit[]
+  savedReports     SavedReport[]
+  notifications    Notification[]
+  notificationLogs NotificationLog[]
+  sentInvites      Invite[]           @relation("SentInvites")
+  receivedInvites  Invite[]           @relation("ReceivedInvites")
+  auditLogs        AuditLog[]
+}
+
+model Organization {
+  id          String              @id @default(cuid())
+  name        String
+  slug        String              @unique
+  logo        String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  members     User[]
+  invites     Invite[]
+  audits      Audit[]
+  departments Department[]
+}
+
+model Department {
+  id             String   @id @default(cuid())
+  name           String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  auditLogs      AuditLog[]
+  @@unique([organizationId, name])
+}
+
+model Invite {
+  id           String          @id @default(cuid())
+  email        String
+  role         UserRole        @default(VIEWER)
+  organizationId String
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  senderId     String
+  sender       User            @relation("SentInvites", fields: [senderId], references: [id])
+  recipientId  String?
+  recipient    User?           @relation("ReceivedInvites", fields: [recipientId], references: [id])
+  token        String          @unique
+  acceptedAt   DateTime?
+  expiresAt    DateTime
+  createdAt    DateTime        @default(now())
+}
+
+model Subscription {
+  id              String             @id @default(cuid())
+  plan            SubscriptionPlan   @default(FREE)
+  status          SubscriptionStatus @default(TRIALING)
+  stripeCustomerId String?
+  stripeSubscriptionId String?
+  stripePriceId    String?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  trialEndsAt      DateTime?
+  canceledAt       DateTime?
+  auditLimit       Int                @default(5)
+  exportLimit      Int                @default(3)
+  aiRecommendations Boolean           @default(false)
+  teamCollaboration Boolean           @default(false)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  user             User?
+  billingHistory   BillingHistory[]
+}
+
+model BillingHistory {
+  id              String             @id @default(cuid())
+  subscriptionId  String
+  subscription    Subscription       @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  amount          Int
+  currency        String             @default("usd")
+  status          String
+  stripeInvoiceId String?
+  stripeReceiptUrl String?
+  description     String
+  periodStart     DateTime?
+  periodEnd       DateTime?
+  createdAt       DateTime           @default(now())
+}
+
+model Notification {
+  id       String           @id @default(cuid())
+  userId   String
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type     NotificationType
+  enabled  Boolean          @default(true)
+  email    String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  @@unique([userId, type])
+}
+
+model NotificationLog {
+  id         String           @id @default(cuid())
+  userId     String
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       NotificationType
+  title      String
+  message    String
+  read       Boolean          @default(false)
+  sentAt     DateTime?
+  createdAt  DateTime         @default(now())
+}
+
+model AuditLog {
+  id           String     @id @default(cuid())
+  userId       String?
+  user         User?      @relation(fields: [userId], references: [id])
+  action       String
+  entity       String
+  entityId     String?
+  metadata     String?
+  ipAddress    String?
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  createdAt    DateTime   @default(now())
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  @@unique([identifier, token])
+}
+
+model Audit {
+  id                 String     @id @default(cuid())
+  userId             String
+  organizationId     String?
+  department         String?
+  totalCurrentSpend  Float
+  totalOptimizedSpend Float
+  totalSavings       Float
+  totalAnnualSavings Float
+  optimizationScore  Float
+  summary            String
+  resultData         String
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  user               User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization       Organization? @relation(fields: [organizationId], references: [id])
+  tools              AuditTool[]
+  savedReports       SavedReport[]
+}
+
+model AuditTool {
+  id             String @id @default(cuid())
+  auditId        String
+  name           String
+  status         String
+  currentSpend   Float
+  optimizedSpend Float
+  savings        Float
+  recommendation String
+  audit          Audit  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+}
+
+model SavedReport {
+  id        String   @id @default(cuid())
+  userId    String
+  auditId   String
+  name      String
+  type      String   @default("pdf")
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  audit     Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+}

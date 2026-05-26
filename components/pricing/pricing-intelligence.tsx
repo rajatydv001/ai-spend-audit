@@ -13,7 +13,7 @@ interface ToolEntry {
 
 export default function PricingIntelligence() {
   const [tools, setTools] = useState<ToolEntry[]>([{ name: "ChatGPT", plan: "Plus", spend: 0, users: 1 }]);
-  const [redundant, setRedundant] = useState<any[] | null>(null);
+  const [redundant, setRedundant] = useState<{ tools: string[]; reason: string; potentialSavings: number }[] | null>(null);
   const [projection, setProjection] = useState<{ monthly: number[]; total: number } | null>(null);
 
   const checkRedundancies = () => {

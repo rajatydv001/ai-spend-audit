@@ -1,6 +1,7 @@
+import OpenAI from "openai";
 import { env } from "@/lib/env";
 
-let openaiClient: any = null;
+let openaiClient: OpenAI | null = null;
 
 async function getOpenAI() {
   if (!env.OPENAI_API_KEY) return null;

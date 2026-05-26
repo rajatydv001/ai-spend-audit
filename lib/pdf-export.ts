@@ -2,6 +2,8 @@ import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
 import type { AggregateAuditResult } from "@/lib/audit-engine";
 
+type DocWithAutoTable = jsPDF & { lastAutoTable: { finalY: number } };
+
 function getHealthLabel(score: number): string {
   if (score >= 85) return "Excellent";
   if (score >= 70) return "Good";
@@ -75,7 +77,7 @@ export async function generatePdfReport(result: AggregateAuditResult): Promise<B
     tableLineWidth: 0.25,
   });
 
-  const tableEnd = (doc as any).lastAutoTable.finalY + 15;
+  const tableEnd = (doc as DocWithAutoTable).lastAutoTable.finalY + 15;
 
   // Tool Analysis
   if (tableEnd + 40 < 280) {
@@ -106,7 +108,7 @@ export async function generatePdfReport(result: AggregateAuditResult): Promise<B
   }
 
   // Recommendations
-  const recStart = Math.min((doc as any).lastAutoTable?.finalY ?? tableEnd, 260);
+  const recStart = Math.min((doc as DocWithAutoTable).lastAutoTable?.finalY ?? tableEnd, 260);
   if (recStart + 30 < 280 && result.priorityRecommendations.length > 0) {
     doc.addPage();
     doc.setFontSize(16);
@@ -133,7 +135,7 @@ export async function generatePdfReport(result: AggregateAuditResult): Promise<B
     });
 
     // Footer
-    const finalY = (doc as any).lastAutoTable?.finalY ?? 250;
+    const finalY = (doc as DocWithAutoTable).lastAutoTable?.finalY ?? 250;
     if (finalY < 270) {
       doc.setFontSize(8);
       doc.setTextColor(107, 114, 128);

@@ -49,7 +49,13 @@ function DashboardContent() {
   }, [auditId]);
 
   useEffect(() => {
-    fetchAudits().finally(() => setLoading(false));
+    let cancelled = false;
+    const load = async () => {
+      await fetchAudits();
+      if (!cancelled) setLoading(false);
+    };
+    load();
+    return () => { cancelled = true; };
   }, [fetchAudits]);
 
   const handleAuditCreated = useCallback(() => {

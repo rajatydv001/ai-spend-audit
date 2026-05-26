@@ -48,5 +48,23 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^1.4.1"
-  }
+  },
+  "description": "> **Audit, optimize, and reduce your organization's AI tool spending.** > A production-grade SaaS platform with AI-powered insights, team collaboration, and subscription billing.",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib",
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rajatydv001/ai-spend-audit.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/rajatydv001/ai-spend-audit/issues"
+  },
+  "homepage": "https://github.com/rajatydv001/ai-spend-audit#readme"
 }

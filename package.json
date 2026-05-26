@@ -48,4 +48,5 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^1.4.1"
+  }
 }

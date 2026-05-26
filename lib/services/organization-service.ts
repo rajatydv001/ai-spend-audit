@@ -3,7 +3,7 @@ import { createAuditLog } from "@/lib/services/audit-log";
 import { v4 as uuidv4 } from "uuid";
 import type { UserRole } from "@prisma/client";
 
-export async function createOrganization(name: string, userId: string) {
+export async function createOrganization(name: string, userId?: string) {
   const slug = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -13,17 +13,19 @@ export async function createOrganization(name: string, userId: string) {
     data: {
       name,
       slug,
-      members: { connect: { id: userId } },
+      ...(userId ? { members: { connect: { id: userId } } } : {}),
     },
   });
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: { organizationId: org.id, role: "ADMIN" },
-  });
+  if (userId) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { organizationId: org.id, role: "ADMIN" },
+    });
+  }
 
   await createAuditLog({
-    userId,
+    userId: userId || "anonymous",
     action: "organization.created",
     entity: "organization",
     entityId: org.id,
@@ -56,7 +58,7 @@ export async function inviteMember(
   organizationId: string,
   email: string,
   role: UserRole,
-  senderId: string
+  senderId?: string
 ) {
   const existingUser = await prisma.user.findUnique({ where: { email } });
   const token = uuidv4();
@@ -66,7 +68,7 @@ export async function inviteMember(
       email,
       role,
       organizationId,
-      senderId,
+      senderId: senderId || "anonymous",
       recipientId: existingUser?.id,
       token,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -74,7 +76,7 @@ export async function inviteMember(
   });
 
   await createAuditLog({
-    userId: senderId,
+    userId: senderId || "anonymous",
     action: "user.invited",
     entity: "invite",
     entityId: invite.id,
@@ -109,7 +111,7 @@ export async function updateMemberRole(
   organizationId: string,
   memberId: string,
   role: UserRole,
-  actorId: string
+  actorId?: string
 ) {
   const member = await prisma.user.findFirst({
     where: { id: memberId, organizationId },
@@ -122,7 +124,7 @@ export async function updateMemberRole(
   });
 
   await createAuditLog({
-    userId: actorId,
+    userId: actorId || "anonymous",
     action: "user.role_changed",
     entity: "user",
     entityId: memberId,

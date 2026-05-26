@@ -22,10 +22,10 @@ export const createAuditSchema = z.object({
 
 export type CreateAuditInput = z.infer<typeof createAuditSchema>;
 
-export async function createAudit(userId: string, data: CreateAuditInput) {
+export async function createAudit(userId: string | null, data: CreateAuditInput) {
   return prisma.audit.create({
     data: {
-      userId,
+      userId: userId || undefined,
       totalCurrentSpend: data.totalCurrentSpend,
       totalOptimizedSpend: data.totalOptimizedSpend,
       totalSavings: data.totalSavings,
@@ -50,7 +50,7 @@ export async function createAudit(userId: string, data: CreateAuditInput) {
 
 export async function getAuditsByUser(userId: string) {
   return prisma.audit.findMany({
-    where: { userId },
+    where: userId ? { userId } : undefined,
     orderBy: { createdAt: "desc" },
     include: { tools: true, _count: { select: { savedReports: true } } },
   });
@@ -58,15 +58,16 @@ export async function getAuditsByUser(userId: string) {
 
 export async function getAuditById(id: string, userId: string) {
   return prisma.audit.findFirst({
-    where: { id, userId },
+    where: userId ? { id, userId } : { id },
     include: { tools: true },
   });
 }
 
 export async function deleteAudit(id: string, userId: string) {
-  return prisma.audit.deleteMany({
-    where: { id, userId },
-  });
+  if (userId) {
+    return prisma.audit.deleteMany({ where: { id, userId } });
+  }
+  return prisma.audit.deleteMany({ where: { id } });
 }
 
 export async function updateAudit(

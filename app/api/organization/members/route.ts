@@ -1,61 +1,30 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { inviteMember, updateMemberRole, removeMember } from "@/lib/services/organization-service";
-import { prisma } from "@/lib/db";
+import { DEFAULT_USER_ID } from "@/lib/defaults";
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { orgId, email, role } = await request.json();
+  if (!orgId || !email) {
+    return NextResponse.json({ error: "orgId and email required" }, { status: 400 });
   }
-
-  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
-  if (user?.role !== "ADMIN") {
-    return NextResponse.json({ error: "Only admins can invite members" }, { status: 403 });
-  }
-  if (!user?.organizationId) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
-
-  const { email, role } = await request.json();
-  const invite = await inviteMember(user.organizationId, email, role, session.user.id);
+  const invite = await inviteMember(orgId, email, role, DEFAULT_USER_ID);
   return NextResponse.json(invite, { status: 201 });
 }
 
 export async function PATCH(request: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { orgId, memberId, role } = await request.json();
+  if (!orgId || !memberId) {
+    return NextResponse.json({ error: "orgId and memberId required" }, { status: 400 });
   }
-
-  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
-  if (user?.role !== "ADMIN") {
-    return NextResponse.json({ error: "Only admins can change roles" }, { status: 403 });
-  }
-  if (!user?.organizationId) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
-
-  const { memberId, role } = await request.json();
-  await updateMemberRole(user.organizationId, memberId, role, session.user.id);
+  await updateMemberRole(orgId, memberId, role);
   return NextResponse.json({ success: true });
 }
 
 export async function DELETE(request: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { orgId, memberId } = await request.json();
+  if (!orgId || !memberId) {
+    return NextResponse.json({ error: "orgId and memberId required" }, { status: 400 });
   }
-
-  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
-  if (user?.role !== "ADMIN") {
-    return NextResponse.json({ error: "Only admins can remove members" }, { status: 403 });
-  }
-  if (!user?.organizationId) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
-
-  const { memberId } = await request.json();
-  await removeMember(user.organizationId, memberId);
+  await removeMember(orgId, memberId);
   return NextResponse.json({ success: true });
 }

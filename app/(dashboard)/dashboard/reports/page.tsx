@@ -1,20 +1,46 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { staggerContainer, staggerItem } from "@/lib/motion-variants";
 import LoadingSkeleton from "@/components/ui/loading-skeleton";
 import EmptyState from "@/components/ui/empty-state";
 
+interface ReportAudit {
+  id: string;
+  createdAt: string;
+  tools?: { name: string; status: string; savings: number }[];
+  optimizationScore: number;
+  totalSavings: number;
+}
+
 export default function ReportsPage() {
-  const [audits, setAudits] = useState<any[]>([]);
+  const [audits, setAudits] = useState<ReportAudit[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/audits")
-      .then((r) => r.json())
-      .then((data) => setAudits(data))
-      .finally(() => setLoading(false));
+    let active = true;
+
+    async function fetchAudits() {
+      try {
+        const res = await fetch("/api/audits");
+        if (!active) return;
+        const data = await res.json();
+        setAudits(data);
+      } catch {
+        if (active) {
+          setAudits([]);
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    fetchAudits();
+    return () => {
+      active = false;
+    };
   }, []);
 
   if (loading) {
@@ -28,7 +54,7 @@ export default function ReportsPage() {
   if (audits.length === 0) {
     return (
       <div className="p-6">
-        <EmptyState icon="📄" title="No reports yet" description="Run an audit and export a PDF report to see it here." action={<a href="/" className="rounded-2xl bg-white px-6 py-3 font-medium text-black transition hover:opacity-80">Run an Audit</a>} />
+        <EmptyState icon="📄" title="No reports yet" description="Run an audit and export a PDF report to see it here." action={<Link href="/" className="rounded-2xl bg-white px-6 py-3 font-medium text-black transition hover:opacity-80">Run an Audit</Link>} />
       </div>
     );
   }

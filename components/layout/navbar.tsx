@@ -1,16 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { useSession, signOut } from "next-auth/react";
-import Link from "next/link";
+import { useState } from "react";
 
 export default function Navbar() {
-  const { data: session } = useSession();
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  const scrollToAudit = useCallback(() => {
-    document.getElementById("audit")?.scrollIntoView({ behavior: "smooth" });
-  }, []);
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-black/40 backdrop-blur-2xl">
@@ -29,38 +22,6 @@ export default function Navbar() {
         </nav>
 
         <div className="flex items-center gap-3">
-          {session ? (
-            <>
-              <Link
-                href="/dashboard"
-                className="rounded-2xl bg-white px-5 py-2 text-sm font-medium text-black transition hover:opacity-80"
-              >
-                Dashboard
-              </Link>
-              <button
-                onClick={() => signOut({ redirectTo: "/" })}
-                className="rounded-2xl border border-white/10 px-5 py-2 text-sm font-medium text-gray-300 transition hover:bg-white/5 sm:block"
-              >
-                Sign Out
-              </button>
-            </>
-          ) : (
-            <>
-              <Link
-                href="/sign-in"
-                className="rounded-2xl border border-white/10 px-5 py-2 text-sm font-medium text-gray-300 transition hover:bg-white/5 sm:block"
-              >
-                Sign In
-              </Link>
-              <button
-                onClick={scrollToAudit}
-                className="hidden rounded-2xl bg-white px-5 py-2 text-sm font-medium text-black transition hover:opacity-80 sm:block"
-              >
-                Audit Now
-              </button>
-            </>
-          )}
-
           {/* Mobile hamburger */}
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
@@ -110,39 +71,6 @@ export default function Navbar() {
             >
               Audit
             </a>
-            {session ? (
-              <>
-                <Link
-                  href="/dashboard"
-                  onClick={() => setMobileOpen(false)}
-                  className="mt-2 rounded-2xl bg-white px-5 py-2.5 text-center text-sm font-medium text-black transition hover:opacity-80"
-                >
-                  Dashboard
-                </Link>
-                <button
-                  onClick={() => { setMobileOpen(false); signOut({ redirectTo: "/" }); }}
-                  className="mt-2 rounded-2xl border border-white/10 px-5 py-2.5 text-center text-sm font-medium text-gray-300 transition hover:bg-white/5"
-                >
-                  Sign Out
-                </button>
-              </>
-            ) : (
-              <>
-                <Link
-                  href="/sign-in"
-                  onClick={() => setMobileOpen(false)}
-                  className="mt-2 rounded-2xl border border-white/10 px-5 py-2.5 text-center text-sm font-medium text-gray-300 transition hover:bg-white/5"
-                >
-                  Sign In
-                </Link>
-                <button
-                  onClick={() => { scrollToAudit(); setMobileOpen(false); }}
-                  className="mt-2 rounded-2xl bg-white px-5 py-2.5 text-sm font-medium text-black transition hover:opacity-80 sm:hidden"
-                >
-                  Audit Now
-                </button>
-              </>
-            )}
           </div>
         </div>
       )}

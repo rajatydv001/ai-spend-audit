@@ -140,28 +140,30 @@ export default function AdvancedAnalytics() {
       {trends.length > 0 && (
         <motion.div variants={staggerItem} className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl">
           <h2 className="text-lg font-bold text-white mb-4">Spending Trends</h2>
-          <div className="space-y-3">
-            <div className="flex items-center gap-4 text-xs text-gray-400 pb-2 border-b border-white/5">
-              <span className="w-24">Date</span>
-              <span className="flex-1">Spend</span>
-              <span className="w-20 text-right">Savings</span>
-            </div>
-            {trends.slice(-10).map((t, i) => {
-              const maxSpend = Math.max(...trends.map((x) => x.spend), 1);
-              return (
-                <div key={i} className="flex items-center gap-4 text-sm">
-                  <span className="w-24 text-gray-400">{t.date}</span>
-                  <div className="flex-1 h-4 rounded-full bg-white/5 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-400"
-                      style={{ width: `${(t.spend / maxSpend) * 100}%` }}
-                    />
+          <div className="overflow-x-auto">
+            <div className="min-w-[400px] space-y-3">
+              <div className="flex items-center gap-4 text-xs text-gray-400 pb-2 border-b border-white/5">
+                <span className="w-24 shrink-0">Date</span>
+                <span className="flex-1">Spend</span>
+                <span className="w-20 shrink-0 text-right">Savings</span>
+              </div>
+              {trends.slice(-10).map((t, i) => {
+                const maxSpend = Math.max(...trends.map((x) => x.spend), 1);
+                return (
+                  <div key={i} className="flex items-center gap-4 text-sm">
+                    <span className="w-24 shrink-0 text-gray-400">{t.date}</span>
+                    <div className="flex-1 h-4 rounded-full bg-white/5 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-400"
+                        style={{ width: `${(t.spend / maxSpend) * 100}%` }}
+                      />
+                    </div>
+                    <span className="w-20 shrink-0 text-right text-white font-medium">${Math.round(t.spend).toLocaleString()}</span>
+                    <span className="w-20 shrink-0 text-right text-green-400">${Math.round(t.savings).toLocaleString()}</span>
                   </div>
-                  <span className="w-20 text-right text-white font-medium">${Math.round(t.spend).toLocaleString()}</span>
-                  <span className="w-20 text-right text-green-400">${Math.round(t.savings).toLocaleString()}</span>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </motion.div>
       )}
@@ -172,7 +174,7 @@ export default function AdvancedAnalytics() {
           <h2 className="text-lg font-bold text-white mb-4">Tool Adoption Analytics</h2>
           <div className="space-y-3">
             {adoption.map((tool) => (
-              <div key={tool.name} className="flex items-center justify-between rounded-xl border border-white/5 bg-black/20 p-3">
+              <div key={tool.name} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-0 rounded-xl border border-white/5 bg-black/20 p-3">
                 <div>
                   <p className="text-sm text-white">{tool.name}</p>
                   <p className="text-xs text-gray-500">{tool.auditCount} audits, avg ${tool.avgSpend}/mo</p>

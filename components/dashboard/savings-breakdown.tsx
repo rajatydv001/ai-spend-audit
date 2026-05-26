@@ -58,7 +58,7 @@ export default function SavingsBreakdown({ result }: SavingsBreakdownProps) {
           {/* Savings by Tool - Bar Chart */}
           <ChartWrapper title="Savings by Tool" subtitle="Monthly savings per tool">
             <ResponsiveContainer width="100%" height={Math.max(200, savingsByTool.length * 70)}>
-              <BarChart data={savingsByTool} layout="vertical" margin={{ left: 80, right: 20 }}>
+              <BarChart data={savingsByTool} layout="vertical" margin={{ left: 60, right: 20 }}>
                 <XAxis type="number" tick={{ fill: "#9CA3AF", fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
                 <YAxis type="category" dataKey="tool" tick={{ fill: "#9CA3AF", fontSize: 12 }} axisLine={false} tickLine={false} />
                 <Tooltip

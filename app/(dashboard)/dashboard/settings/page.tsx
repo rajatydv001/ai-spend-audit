@@ -6,10 +6,9 @@ import { staggerContainer, staggerItem } from "@/lib/motion-variants";
 import { CURRENCY_OPTIONS, TEAM_SIZE_OPTIONS } from "@/lib/constants";
 import LoadingSkeleton from "@/components/ui/loading-skeleton";
 import toast from "react-hot-toast";
-import TeamSettings from "@/components/team/team-settings";
 import NotificationPanel from "@/components/notifications/notification-panel";
 
-type Tab = "preferences" | "team" | "notifications";
+type Tab = "preferences" | "notifications";
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
@@ -51,7 +50,6 @@ export default function SettingsPage() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "preferences", label: "Preferences" },
-    { id: "team", label: "Team" },
     { id: "notifications", label: "Notifications" },
   ];
 
@@ -72,21 +70,23 @@ export default function SettingsPage() {
     >
       <motion.div variants={staggerItem}>
         <h1 className="text-3xl font-bold text-white">Settings</h1>
-        <p className="text-gray-400 mt-1">Manage your account, team, and preferences</p>
+        <p className="text-gray-400 mt-1">Manage your account and preferences</p>
       </motion.div>
 
-      <motion.div variants={staggerItem} className="flex gap-1 rounded-2xl border border-white/10 bg-white/5 p-1">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 rounded-xl py-2.5 text-sm font-medium transition ${
-              activeTab === tab.id ? "bg-white/10 text-white" : "text-gray-400 hover:text-gray-300"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <motion.div variants={staggerItem} className="overflow-x-auto">
+        <div className="flex gap-1 rounded-2xl border border-white/10 bg-white/5 p-1 min-w-[300px]">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 rounded-xl py-2.5 text-xs sm:text-sm font-medium whitespace-nowrap transition ${
+                activeTab === tab.id ? "bg-white/10 text-white" : "text-gray-400 hover:text-gray-300"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </motion.div>
 
       {activeTab === "preferences" && (
@@ -126,12 +126,6 @@ export default function SettingsPage() {
           >
             {saving ? "Saving..." : "Save Preferences"}
           </button>
-        </motion.div>
-      )}
-
-      {activeTab === "team" && (
-        <motion.div variants={staggerItem}>
-          <p className="text-sm text-gray-400 mb-4">Team management available on Pro plan and above.</p>
         </motion.div>
       )}
 

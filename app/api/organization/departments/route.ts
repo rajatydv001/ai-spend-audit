@@ -1,38 +1,21 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { createDepartment, getDepartments } from "@/lib/services/organization-service";
-import { prisma } from "@/lib/db";
 
-export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const orgId = searchParams.get("orgId");
+  if (!orgId) {
+    return NextResponse.json({ error: "orgId required" }, { status: 400 });
   }
-
-  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
-  if (!user?.organizationId) {
-    return NextResponse.json([]);
-  }
-
-  const departments = await getDepartments(user.organizationId);
+  const departments = await getDepartments(orgId);
   return NextResponse.json(departments);
 }
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { orgId, name } = await request.json();
+  if (!orgId || !name) {
+    return NextResponse.json({ error: "orgId and name required" }, { status: 400 });
   }
-
-  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
-  if (user?.role !== "ADMIN") {
-    return NextResponse.json({ error: "Only admins can create departments" }, { status: 403 });
-  }
-  if (!user?.organizationId) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
-
-  const { name } = await request.json();
-  const dept = await createDepartment(user.organizationId, name);
+  const dept = await createDepartment(orgId, name);
   return NextResponse.json(dept, { status: 201 });
 }

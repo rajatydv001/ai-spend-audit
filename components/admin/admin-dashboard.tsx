@@ -112,7 +112,7 @@ export default function AdminDashboard() {
               const pct = total > 0 ? (count / total) * 100 : 0;
               return (
                 <div key={plan} className="flex items-center gap-3">
-                  <span className="w-24 text-sm text-gray-300">{plan}</span>
+                  <span className="min-w-0 w-24 shrink-0 text-sm text-gray-300">{plan}</span>
                   <div className="flex-1 h-3 rounded-full bg-white/5 overflow-hidden">
                     <div
                       className={`h-full rounded-full ${
@@ -175,7 +175,7 @@ export default function AdminDashboard() {
       {auditLogs.length > 0 && (
         <motion.div variants={staggerItem} className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl">
           <h2 className="text-lg font-bold text-white mb-4">Audit Log</h2>
-          <div className="space-y-1 max-h-80 overflow-y-auto">
+          <div className="space-y-1 max-h-80 overflow-y-auto overflow-x-auto">
             {auditLogs.map((log) => (
               <div key={log.id} className="flex items-center gap-3 rounded-lg px-3 py-2 text-xs hover:bg-white/5">
                 <span className="w-20 text-gray-500">

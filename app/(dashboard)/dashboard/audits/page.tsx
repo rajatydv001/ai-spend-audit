@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { staggerContainer, staggerItem } from "@/lib/motion-variants";
 import LoadingSkeleton from "@/components/ui/loading-skeleton";
@@ -23,21 +24,29 @@ export default function AuditsPage() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
 
-  const loadAudits = useCallback(async () => {
-    try {
-      const res = await fetch("/api/audits");
-      if (res.ok) {
-        const data = await res.json();
-        setAudits(data);
-      }
-    } catch {
-      toast.error("Failed to load audits");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  useEffect(() => {
+    let active = true;
 
-  useEffect(() => { loadAudits(); }, [loadAudits]);
+    async function fetchAudits() {
+      try {
+        const res = await fetch("/api/audits");
+        if (!active) return;
+        if (res.ok) {
+          const data = await res.json();
+          setAudits(data);
+        }
+      } catch {
+        if (active) toast.error("Failed to load audits");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    fetchAudits();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleDelete = async (id: string) => {
     setDeleting(id);
@@ -67,7 +76,7 @@ export default function AuditsPage() {
   if (audits.length === 0) {
     return (
       <div className="p-6">
-        <EmptyState icon="🔍" title="No audits found" description="Run your first audit to start tracking your AI spend." action={<a href="/" className="rounded-2xl bg-white px-6 py-3 font-medium text-black transition hover:opacity-80">Run an Audit</a>} />
+        <EmptyState icon="🔍" title="No audits found" description="Run your first audit to start tracking your AI spend." action={<Link href="/" className="rounded-2xl bg-white px-6 py-3 font-medium text-black transition hover:opacity-80">Run an Audit</Link>} />
       </div>
     );
   }

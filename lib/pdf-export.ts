@@ -1,5 +1,5 @@
 import { jsPDF } from "jspdf";
-import "jspdf-autotable";
+import { autoTable } from "jspdf-autotable";
 import type { AggregateAuditResult } from "@/lib/audit-engine";
 
 function getHealthLabel(score: number): string {
@@ -63,7 +63,7 @@ export async function generatePdfReport(result: AggregateAuditResult): Promise<B
     ["AI Health Status", getHealthLabel(result.overallOptimizationScore)],
   ];
 
-  (doc as any).autoTable({
+  autoTable(doc, {
     head: [metrics[0]],
     body: metrics.slice(1),
     startY: 155,
@@ -92,7 +92,7 @@ export async function generatePdfReport(result: AggregateAuditResult): Promise<B
       t.status,
     ]);
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       head: [["Tool", "Current", "Optimized", "Savings", "Status"]],
       body: toolRows,
       startY: tableEnd + 8,
@@ -119,7 +119,7 @@ export async function generatePdfReport(result: AggregateAuditResult): Promise<B
       doc.splitTextToSize(r, 120),
     ]);
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       head: [["#", "Recommendation"]],
       body: recRows,
       startY: 35,

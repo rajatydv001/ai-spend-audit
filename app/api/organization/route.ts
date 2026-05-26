@@ -1,37 +1,23 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { createOrganization, getOrganization } from "@/lib/services/organization-service";
+import { DEFAULT_USER_ID } from "@/lib/defaults";
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { name } = await request.json();
   if (!name) {
     return NextResponse.json({ error: "Organization name required" }, { status: 400 });
   }
 
-  const org = await createOrganization(name, session.user.id);
+  const org = await createOrganization(name, DEFAULT_USER_ID);
   return NextResponse.json(org, { status: 201 });
 }
 
-export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const orgId = searchParams.get("orgId");
+  if (!orgId) {
+    return NextResponse.json({ error: "orgId required" }, { status: 400 });
   }
-
-  const user = await (await import("@/lib/db")).prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { organizationId: true },
-  });
-
-  if (!user?.organizationId) {
-    return NextResponse.json({ organization: null });
-  }
-
-  const org = await getOrganization(user.organizationId);
+  const org = await getOrganization(orgId);
   return NextResponse.json(org);
 }

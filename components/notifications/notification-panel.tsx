@@ -13,8 +13,7 @@ interface NotificationItem {
   createdAt: string;
 }
 
-interface NotificationPreferences {
-  userId_type: { userId: string; type: string };
+interface NotificationPreference {
   type: string;
   enabled: boolean;
 }
@@ -22,24 +21,32 @@ interface NotificationPreferences {
 export default function NotificationPanel() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [preferences, setPreferences] = useState<NotificationPreferences[]>([]);
+  const [preferences, setPreferences] = useState<NotificationPreference[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchData = async () => {
-    try {
-      const res = await fetch("/api/notifications");
-      const data = await res.json();
-      setNotifications(data.notifications || []);
-      setUnreadCount(data.unreadCount || 0);
-      setPreferences(data.preferences || []);
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    let active = true;
 
-  useEffect(() => { fetchData(); }, []);
+    async function fetchData() {
+      try {
+        const res = await fetch("/api/notifications");
+        const data = await res.json();
+        if (!active) return;
+        setNotifications(data.notifications || []);
+        setUnreadCount(data.unreadCount || 0);
+        setPreferences(data.preferences || []);
+      } catch {
+        // silent
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    fetchData();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const markAllRead = async () => {
     await fetch("/api/notifications", { method: "PATCH" });

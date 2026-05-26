@@ -78,7 +78,7 @@ export default function PricingIntelligence() {
                     updated[i] = { ...updated[i], spend: Number(e.target.value) };
                     setTools(updated);
                   }}
-                  className="w-28 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none"
+                  className="w-full sm:w-28 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none"
                 />
               </div>
               <div>
@@ -91,7 +91,7 @@ export default function PricingIntelligence() {
                     updated[i] = { ...updated[i], users: Number(e.target.value) };
                     setTools(updated);
                   }}
-                  className="w-20 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none"
+                  className="w-full sm:w-20 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none"
                 />
               </div>
               <button
@@ -103,7 +103,7 @@ export default function PricingIntelligence() {
             </div>
           ))}
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={() => setTools([...tools, { name: "ChatGPT", plan: "Plus", spend: 0, users: 1 }])}
               className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-300 hover:bg-white/10"

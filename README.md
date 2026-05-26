@@ -109,6 +109,21 @@
 └── middleware.ts         # Route protection
 ```
 
+## Submission Documents
+
+This repository now includes the following supporting documentation required for portfolio or Credex-style submissions:
+- `DEVLOG.md`
+- `REFLECTION.md`
+- `TESTS.md`
+- `PRICING_DATA.md`
+- `PROMPTS.md`
+- `GTM.md`
+- `ECONOMICS.md`
+- `USER_INTERVIEWS.md`
+- `LANDING_COPY.md`
+- `METRICS.md`
+- `ARCHITECTURE.md`
+
 ## Getting Started
 
 ### Prerequisites

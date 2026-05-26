@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import {
   generateOptimizationInsights,
@@ -7,26 +6,15 @@ import {
   generateVendorConsolidationSuggestions,
   generateROIAnalysis,
 } from "@/lib/services/ai-service";
-import { getUserPlan } from "@/lib/services/subscription-service";
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const plan = await getUserPlan(session.user.id);
-  if (!plan.aiRecommendations) {
-    return NextResponse.json({ error: "AI recommendations require Pro plan or higher" }, { status: 403 });
-  }
-
   const { auditId, type } = await request.json();
   if (!auditId || !type) {
     return NextResponse.json({ error: "auditId and type required" }, { status: 400 });
   }
 
   const audit = await prisma.audit.findFirst({
-    where: { id: auditId, userId: session.user.id },
+    where: { id: auditId },
     include: { tools: true },
   });
   if (!audit) {
@@ -48,7 +36,7 @@ export async function POST(request: Request) {
     summary: audit.summary,
   };
 
-  let result: any;
+  let result: string | string[];
 
   switch (type) {
     case "insights":

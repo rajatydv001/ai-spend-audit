@@ -32,7 +32,7 @@ export default function Home() {
             and discover smarter alternatives instantly.
           </p>
 
-          <div className="mt-10 flex gap-4">
+          <div className="mt-10 flex flex-col sm:flex-row gap-4">
             <a
               href="#audit"
               className="rounded-2xl bg-white px-6 py-3 font-medium text-black transition hover:opacity-80"

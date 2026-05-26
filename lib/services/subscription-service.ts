@@ -36,6 +36,10 @@ export async function getUserPlan(userId: string): Promise<{
   auditCount: number;
   exportCount: number;
 }> {
+  if (!userId) {
+    return { plan: "FREE", auditLimit: 999999, exportLimit: 999999, aiRecommendations: true, teamCollaboration: true, auditCount: 0, exportCount: 0 };
+  }
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {

@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useSession } from "next-auth/react";
+import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { generateAggregateAudit, type AggregateAuditResult } from "@/lib/audit-engine";
 import { useAuditStore } from "@/lib/store/audit-store";
 import AuditResults from "@/components/audit-results";
 import LoadingSkeleton from "@/components/ui/loading-skeleton";
-import toast from "react-hot-toast";
 
 interface ToolConfig {
   name: string;
@@ -67,7 +66,7 @@ type ToolEntry = {
   users: string;
 };
 
-export default function AuditForm() {
+export default function AuditForm({ variant = "homepage", onAuditCreated }: { variant?: "homepage" | "dashboard"; onAuditCreated?: () => void }) {
   const [toolEntries, setToolEntries] = useState<ToolEntry[]>([
     { tool: "", plan: "", spend: "", users: "" }
   ]);
@@ -78,22 +77,32 @@ export default function AuditForm() {
   const setResult = useAuditStore((s) => s.setResult);
 
   const [auditResult, setAuditResult] = useState<AggregateAuditResult | null>(null);
+  const [createdAuditId, setCreatedAuditId] = useState<string | null>(null);
 
   // Load from localStorage on mount
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("aiAuditToolEntries");
-      if (saved) {
-        const parsed = JSON.parse(saved) as ToolEntry[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setToolEntries(parsed);
+    let active = true;
+
+    async function loadStoredEntries() {
+      try {
+        const saved = localStorage.getItem("aiAuditToolEntries");
+        if (saved && active) {
+          const parsed = JSON.parse(saved) as ToolEntry[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setToolEntries(parsed);
+          }
         }
+      } catch (error) {
+        console.error("Failed to load audit data from localStorage:", error);
+      } finally {
+        if (active) setIsHydrated(true);
       }
-    } catch (error) {
-      console.error("Failed to load audit data from localStorage:", error);
-    } finally {
-      setIsHydrated(true);
     }
+
+    loadStoredEntries();
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Save to localStorage whenever toolEntries changes
@@ -139,38 +148,6 @@ export default function AuditForm() {
   const removeToolEntry = (index: number) => {
     setToolEntries(toolEntries.filter((_, i) => i !== index));
   };
-
-  const { data: session } = useSession();
-
-  const persistAudit = useCallback(async (result: AggregateAuditResult, entries: { tool: string; spend: number; users: number }[]) => {
-    if (!session?.user?.id) return;
-
-    try {
-      await fetch("/api/audits", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          totalCurrentSpend: result.totalCurrentSpend,
-          totalOptimizedSpend: result.totalOptimizedSpend,
-          totalSavings: result.totalSavings,
-          totalAnnualSavings: result.totalAnnualSavings,
-          optimizationScore: result.overallOptimizationScore,
-          summary: result.summary,
-          resultData: JSON.stringify(result),
-          tools: result.tools.map((t) => ({
-            name: t.tool,
-            status: t.status,
-            currentSpend: t.currentSpend,
-            optimizedSpend: t.optimizedSpend,
-            savings: t.savings,
-            recommendation: t.recommendation,
-          })),
-        }),
-      });
-    } catch {
-      toast.error("Failed to save audit");
-    }
-  }, [session]);
 
   return (
     <>
@@ -296,14 +273,36 @@ export default function AuditForm() {
                 setResult(auditData);
                 setIsGenerating(false);
 
-                await persistAudit(
-                  auditData,
-                  validEntries.map((entry) => ({
-                    tool: entry.tool,
-                    spend: Number(entry.spend),
-                    users: Number(entry.users),
-                  }))
-                );
+                try {
+                  const res = await fetch("/api/audits", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      totalCurrentSpend: auditData.totalCurrentSpend,
+                      totalOptimizedSpend: auditData.totalOptimizedSpend,
+                      totalSavings: auditData.totalSavings,
+                      totalAnnualSavings: auditData.totalAnnualSavings,
+                      optimizationScore: auditData.overallOptimizationScore,
+                      summary: auditData.summary,
+                      resultData: JSON.stringify(auditData),
+                      tools: auditData.tools.map((t) => ({
+                        name: t.tool,
+                        status: t.status,
+                        currentSpend: t.currentSpend,
+                        optimizedSpend: t.optimizedSpend,
+                        savings: t.savings,
+                        recommendation: t.recommendation,
+                      })),
+                    }),
+                  });
+                  if (res.ok) {
+                    const created = await res.json();
+                    setCreatedAuditId(created.id);
+                  }
+                } catch (e) {
+                  console.error("Failed to save audit:", e);
+                }
+                onAuditCreated?.();
               });
             }}
             disabled={!toolEntries[0].tool || isGenerating}
@@ -330,27 +329,40 @@ export default function AuditForm() {
           )}
 
           {auditResult && <AuditResults result={auditResult} />}
+
+          {auditResult && createdAuditId && variant === "homepage" && (
+            <div className="flex justify-center mt-8">
+              <Link
+                href={`/dashboard?auditId=${createdAuditId}`}
+                className="rounded-2xl bg-white px-6 py-3 font-medium text-black transition hover:opacity-80"
+              >
+                View Full Dashboard →
+              </Link>
+            </div>
+          )}
         </div>
       </div>
     </section>
 
-      <AnimatePresence>
-        {auditResult && (
-          <motion.button
-            initial={{ opacity: 0, y: 48, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 48, scale: 0.9 }}
-            transition={{ type: "spring", stiffness: 400, damping: 25 }}
-            onClick={scrollToAudit}
-            className="fixed bottom-8 right-8 z-50 flex items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-medium text-black shadow-2xl transition hover:opacity-80"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14M5 12l7 7 7-7" />
-            </svg>
-            Run New Audit
-          </motion.button>
-        )}
-      </AnimatePresence>
+      {variant === "homepage" && (
+        <AnimatePresence>
+          {auditResult && (
+            <motion.button
+              initial={{ opacity: 0, y: 48, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 48, scale: 0.9 }}
+              transition={{ type: "spring", stiffness: 400, damping: 25 }}
+              onClick={scrollToAudit}
+              className="fixed bottom-8 right-8 z-50 flex items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-medium text-black shadow-2xl transition hover:opacity-80"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5v14M5 12l7 7 7-7" />
+              </svg>
+              Run New Audit
+            </motion.button>
+          )}
+        </AnimatePresence>
+      )}
     </>
   );
 }

@@ -5,7 +5,7 @@ export async function getSpendingTrends(
   months: number = 6
 ) {
   const audits = await prisma.audit.findMany({
-    where: { userId },
+    where: userId ? { userId } : {},
     orderBy: { createdAt: "asc" },
     take: months,
     select: {
@@ -60,7 +60,7 @@ export async function getDepartmentAnalytics(organizationId: string) {
 
 export async function getToolAdoptionAnalytics(userId: string) {
   const audits = await prisma.audit.findMany({
-    where: { userId },
+    where: userId ? { userId } : {},
     include: { tools: true },
     orderBy: { createdAt: "desc" },
     take: 50,
@@ -92,7 +92,7 @@ export async function getToolAdoptionAnalytics(userId: string) {
 
 export async function getAIUtilizationScore(userId: string) {
   const audits = await prisma.audit.findMany({
-    where: { userId },
+    where: userId ? { userId } : {},
     orderBy: { createdAt: "desc" },
     take: 10,
     include: { tools: true },
@@ -129,7 +129,7 @@ export async function getAIUtilizationScore(userId: string) {
 
 export async function getProjectedFutureSpend(userId: string) {
   const audits = await prisma.audit.findMany({
-    where: { userId },
+    where: userId ? { userId } : {},
     orderBy: { createdAt: "asc" },
     select: { createdAt: true, totalCurrentSpend: true },
   });

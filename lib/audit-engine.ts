@@ -12,6 +12,33 @@ export interface ToolConfig {
   category: "SaaS" | "API";
 }
 
+// Tool pricing is sourced from the versioned, time-aware catalog. The audit
+// engine resolves the plans that were active for the audit's `date`, so
+// historical audits reuse the pricing valid at that time and future price
+// changes never silently rewrite past or current results. The API tools are
+// usage-based and carry price 0 by design (never converted to a fixed price).
+import {
+  getActiveToolPlans,
+  isReplacementValid,
+  type ActiveToolPlan,
+} from "@/lib/pricing/catalog";
+
+// Tools that are usage-based API products, distinct from per-seat SaaS tools.
+const API_TOOLS = new Set(["OpenAI API", "Anthropic API", "ChatGPT API", "Claude API"]);
+
+/**
+ * Build the effective tool config for an audit date. SaaS tools come from the
+ * catalog's plans active on that date for the default MONTHLY cadence (the app
+ * does not expose a billing-cadence choice, so annual report-only variants are
+ * never silently used for optimization). Custom (contact-sales) plans are kept
+ * for display but never treated as a fixed $-priced tier, and usage-based API
+ * tools are always usage.
+ */
+function getPlanSurface(tool: string, date: Date): ActiveToolPlan[] | undefined {
+  if (API_TOOLS.has(tool)) return undefined;
+  return getActiveToolPlans(tool, date);
+}
+
 export interface ToolAuditResult {
   tool: string;
   status: AuditStatus;
@@ -20,6 +47,8 @@ export interface ToolAuditResult {
   optimizedSpend: number;
   savings: number;
   optimizationScore: number;
+  currentPlan: string;
+  recommendedPlan: string;
 }
 
 export interface EnhancedRecommendation {
@@ -41,149 +70,105 @@ export interface AggregateAuditResult {
   overallOptimizationScore: number;
   priorityRecommendations: string[];
   summary: string;
-  roiEstimate: number;
+  savingsRate: number;
   teamEfficiencyScore: number;
   enhancedRecommendations: EnhancedRecommendation[];
 }
 
-// Tool Pricing Configuration
-const TOOL_CONFIGS: Record<string, ToolConfig> = {
-  ChatGPT: {
-    category: "SaaS",
-    plans: [
-      { name: "Free", costPerUser: 0 },
-      { name: "Plus", costPerUser: 20 },
-      { name: "Team", costPerUser: 30, minUsers: 2 },
-      { name: "Enterprise", costPerUser: 50, minUsers: 10 },
-      { name: "API", costPerUser: 0 },
-    ],
-  },
-  Claude: {
-    category: "SaaS",
-    plans: [
-      { name: "Free", costPerUser: 0 },
-      { name: "Pro", costPerUser: 20 },
-      { name: "Max", costPerUser: 20 },
-      { name: "Team", costPerUser: 25, minUsers: 2 },
-      { name: "Enterprise", costPerUser: 45, minUsers: 10 },
-      { name: "API", costPerUser: 0 },
-    ],
-  },
-  Cursor: {
-    category: "SaaS",
-    plans: [
-      { name: "Hobby", costPerUser: 0 },
-      { name: "Pro", costPerUser: 20 },
-      { name: "Business", costPerUser: 40, minUsers: 3 },
-      { name: "Enterprise", costPerUser: 60, minUsers: 10 },
-    ],
-  },
-  Copilot: {
-    category: "SaaS",
-    plans: [
-      { name: "Individual", costPerUser: 20 },
-      { name: "Business", costPerUser: 15, minUsers: 5 },
-      { name: "Enterprise", costPerUser: 25, minUsers: 20 },
-    ],
-  },
-  Gemini: {
-    category: "SaaS",
-    plans: [
-      { name: "Free", costPerUser: 0 },
-      { name: "Pro", costPerUser: 20 },
-      { name: "Ultra", costPerUser: 20 },
-      { name: "API", costPerUser: 0 },
-    ],
-  },
-  "OpenAI API": {
-    category: "API",
-    plans: [{ name: "Pay-as-you-go", costPerUser: 0 }],
-  },
-  "Anthropic API": {
-    category: "API",
-    plans: [{ name: "Pay-as-you-go", costPerUser: 0 }],
-  },
-  Windsurf: {
-    category: "SaaS",
-    plans: [
-      { name: "Hobby", costPerUser: 0 },
-      { name: "Pro", costPerUser: 20 },
-      { name: "Business", costPerUser: 40, minUsers: 3 },
-      { name: "Enterprise", costPerUser: 60, minUsers: 10 },
-    ],
-  },
-};
+interface OptimalPlan {
+  currentPlan: ActiveToolPlan;
+  cheapestEligible: ActiveToolPlan | null;
+  estimatedCost: number;
+  savings: number;
+}
 
 /**
- * Calculate the optimal plan and estimated cost for a given tool
+ * Determine the current plan (the active tier whose per-seat list price is
+ * closest to the reported spend-per-seat) and the best ELIGIBLE downgrade.
+ *
+ * Eligibility is segment-aware (see `isReplacementValid`): cheapest is NOT
+ * automatically the right answer. A strictly-cheaper replacement is only
+ * offered when it addresses an equal-or-lower customer segment and does not
+ * illegally cross an organization/consumer or power/free boundary. If no
+ * eligible lower-cost replacement exists, savings is 0 and no plan is
+ * recommended (we never claim 100% savings via a forbidden downgrade).
  */
 function calculateOptimalPlan(
   tool: string,
   spend: number,
-  users: number
-): { plan: string; estimatedCost: number; savings: number } | null {
-  const config = TOOL_CONFIGS[tool];
-  if (!config) return null;
+  users: number,
+  date: Date,
+  plan?: string
+): OptimalPlan | null {
+  const surface = getPlanSurface(tool, date);
+  if (!surface) return null;
 
-  if (config.category === "SaaS") {
-    const validPlans = config.plans.filter(
-      (plan) => !plan.minUsers || plan.minUsers <= users
-    );
+  // Custom + usage plans have no fixed price — exclude from pricing optimization.
+  const priced = surface.filter((p) => !p.custom && !p.usageBased);
+  const validPlans = priced.filter(
+    (plan) => !plan.minUsers || plan.minUsers <= users
+  );
 
-    if (validPlans.length === 0) return null;
+  if (validPlans.length === 0) return null;
 
-    const bestPlan = validPlans.reduce((best, current) =>
-      current.costPerUser * users < best.costPerUser * users ? current : best
-    );
+  const costPerSeat = users > 0 ? spend / users : 0;
+  const detected = validPlans.reduce((closest, candidate) => {
+    const diff = Math.abs(candidate.costPerUser - costPerSeat);
+    const closestDiff = Math.abs(closest.costPerUser - costPerSeat);
+    return diff < closestDiff ? candidate : closest;
+  });
 
-    const estimatedCost = bestPlan.costPerUser * users;
-    const savings = Math.max(0, spend - estimatedCost);
+  // An explicitly selected plan is authoritative when it exists in the active
+  // surface and satisfies its seat minimum; otherwise fall back to the
+  // spend-per-seat estimate. Custom (contact-sales) plans are valid selections:
+  // they are displayed as the current tier, but having no fixed price
+  // (costPerUser 0) they can never produce a fabricated cheaper downgrade.
+  const currentPlan = plan
+    ? (surface.find(
+        (p) => p.name === plan && (!p.minUsers || p.minUsers <= users)
+      ) ?? detected)
+    : detected;
 
-    return { plan: bestPlan.name, estimatedCost, savings };
-  }
+  // Strictly-cheaper, segment-eligible replacements only.
+  const eligible = validPlans
+    .filter((p) => p.costPerUser < currentPlan.costPerUser)
+    .filter((p) => isReplacementValid(p, currentPlan))
+    .sort((a, b) => a.costPerUser - b.costPerUser);
 
-  if (config.category === "API" && spend > 100) {
-    const potentialSavings = Math.floor(spend * 0.15);
-    return {
-      plan: "Volume Pricing",
-      estimatedCost: spend - potentialSavings,
-      savings: potentialSavings,
-    };
-  }
+  const cheapestEligible = eligible[0] ?? null;
+  const estimatedCost = cheapestEligible
+    ? cheapestEligible.costPerUser * users
+    : spend;
+  const savings = cheapestEligible
+    ? Math.max(0, spend - estimatedCost)
+    : 0;
 
-  return null;
+  return { currentPlan, cheapestEligible, estimatedCost, savings };
 }
 
 /**
- * Generate recommendation based on tool and usage patterns
+ * Generate recommendation based on tool and usage patterns.
  */
 function generateRecommendation(
   tool: string,
   spend: number,
   users: number,
-  savings: number
+  savings: number,
+  date: Date,
+  plan?: string
 ): string {
-  if (savings === 0) {
-    return `Your ${tool} setup appears well-optimized for ${users} user${users > 1 ? "s" : ""} at $${spend}/mo.`;
-  }
+  const optimal = calculateOptimalPlan(tool, spend, users, date, plan);
 
-  const optimal = calculateOptimalPlan(tool, spend, users);
-  if (!optimal) return "";
-
-  if (tool === "ChatGPT" || tool === "Claude" || tool === "Cursor") {
-    if (spend > 80 && users < 3) {
-      return `Downgrade to a lower tier or free plan. Current spend: $${spend}/mo → Recommended: $${optimal.estimatedCost}/mo ($${savings}/mo savings).`;
+  if (savings === 0 || !optimal?.cheapestEligible) {
+    if (!optimal) return "";
+    const planName = optimal.currentPlan.name;
+    if (optimal.currentPlan.custom) {
+      return `No verified lower-cost replacement found for your ${tool} setup (${planName}) at ${users} user${users > 1 ? "s" : ""} / $${spend}/mo. ${planName} pricing is custom (contact-sales), so it cannot be compared to published monthly list prices here — ask your account team for a rate review.`;
     }
-    if (spend > 150 && users >= 10) {
-      return `Consider negotiating an Enterprise plan with volume discounts. Potential savings: $${savings}/mo.`;
-    }
+    return `No verified lower-cost replacement found for your ${tool} setup (${planName}) at ${users} user${users > 1 ? "s" : ""} / $${spend}/mo. Downgrading would require a plan that is not an eligible replacement (e.g. an organization tier dropping to a consumer tier) or a free plan that is not appropriate.`;
   }
 
-  if (tool === "OpenAI API" || tool === "Anthropic API") {
-    return `Optimize API usage with volume pricing or reserved credits. Potential savings: $${savings}/mo through efficient usage patterns.`;
-  }
-
-  return `Switch to ${optimal.plan} plan. Estimated savings: $${savings}/mo.`;
+  return `Switch to the ${optimal.cheapestEligible.name} plan. Estimated savings: $${savings}/mo ($${spend}/mo → $${optimal.estimatedCost}/mo).`;
 }
 
 /**
@@ -246,21 +231,59 @@ function generateExecutiveSummary(
 function auditSingleTool(
   tool: string,
   spend: number,
-  users: number
+  users: number,
+  date: Date = new Date(),
+  plan?: string
 ): ToolAuditResult {
-  if (!tool || spend <= 0 || users <= 0) {
+  if (!tool || users <= 0 || spend < 0) {
     return {
       tool,
       status: "Optimized",
       recommendation: "Please provide valid input values.",
+      currentSpend: Math.max(0, spend),
+      optimizedSpend: Math.max(0, spend),
+      savings: 0,
+      optimizationScore: 100,
+      currentPlan: "",
+      recommendedPlan: "",
+    };
+  }
+
+  // A genuine free plan ($0 spend) is a valid, already-optimized result — never
+  // treated as an invalid/empty input. No negative savings and no meaningless
+  // optimization is invented for it.
+  if (spend === 0) {
+    return {
+      tool,
+      status: "Optimized",
+      recommendation: `${tool} is on a free plan at $0/month. There is no cost to optimize.`,
+      currentSpend: 0,
+      optimizedSpend: 0,
+      savings: 0,
+      optimizationScore: 100,
+      currentPlan: "Free",
+      recommendedPlan: "",
+    };
+  }
+
+  // Usage-based API products are not fixed per-seat subscriptions and cannot be
+  // "downgraded" to an estimated fixed price. Never fabricate savings; explain
+  // that real savings require usage/cost data.
+  if (API_TOOLS.has(tool)) {
+    return {
+      tool,
+      status: "Optimized",
+      recommendation: `${tool} is billed on usage (pay-as-you-go). Savings can only be estimated from actual usage/cost data — they are not fabricated from published monthly list prices here.`,
       currentSpend: spend,
       optimizedSpend: spend,
       savings: 0,
       optimizationScore: 100,
+      currentPlan: "",
+      recommendedPlan: "",
     };
   }
 
-  const optimal = calculateOptimalPlan(tool, spend, users);
+  const optimal = calculateOptimalPlan(tool, spend, users, date, plan);
   const savings = optimal?.savings ?? 0;
   const optimizationScore = calculateOptimizationScore(savings, spend);
 
@@ -268,7 +291,7 @@ function auditSingleTool(
   if (savings > 20) status = "Overpaying";
   else if (savings > 5) status = "Optimization Available";
 
-  const recommendation = generateRecommendation(tool, spend, users, savings);
+  const recommendation = generateRecommendation(tool, spend, users, savings, date, plan);
 
   return {
     tool,
@@ -278,29 +301,52 @@ function auditSingleTool(
     optimizedSpend: Math.max(0, spend - savings),
     savings,
     optimizationScore,
+    currentPlan: optimal?.currentPlan.name ?? "",
+    recommendedPlan: optimal?.cheapestEligible?.name ?? "",
   };
 }
 
 /**
  * Generate audit for single tool (backward compatible)
+ *
+ * @param date optional audit date; defaults to now. Pricing valid at `date` is
+ *   used so historical audits reuse the pricing that applied then.
  */
 export function generateAudit(
   tool: string,
   spend: number,
-  users: number
+  users: number,
+  date: Date = new Date(),
+  plan?: string
 ): ToolAuditResult {
-  return auditSingleTool(tool, spend, users);
+  return auditSingleTool(tool, spend, users, date, plan);
 }
 
 /**
  * Generate aggregate audit for multiple tools
+ *
+ * @param date optional audit date; defaults to now.
+ * @param plan optional user-selected plan; when present in the active surface
+ *   (and satisfying its seat minimum) it is used as the current tier instead of
+ *   the spend-per-seat estimate, so e.g. a custom Cursor Enterprise tier
+ *   displays as "Enterprise" rather than a misdetected list-price plan.
  */
 export function generateAggregateAudit(
-  tools: Array<{ tool: string; spend: number; users: number }>
+  tools: Array<{ tool: string; spend: number; users: number; plan?: string }>,
+  date: Date = new Date()
 ): AggregateAuditResult {
-  const validTools = tools.filter((t) => t.tool && t.spend > 0 && t.users > 0);
+  // Drop only entries with a missing tool or no seats. Zero-spend free plans are
+  // valid and must surface as an (already optimized) $0 tool rather than being
+  // silently dropped; negative spend is handled as invalid inside auditSingleTool.
+  const validTools = tools.filter((t) => t.tool && t.users > 0);
 
   if (validTools.length === 0) {
+    // Distinguish "no tools at all" from "tools present but missing seats" so
+    // the empty state never lies about why nothing was audited.
+    const hasToolWithoutSeats = tools.some((t) => t.tool && !(t.users > 0));
+    const summary = hasToolWithoutSeats
+      ? "The audit could not run because one or more tools are missing seats. Enter at least one seat per tool to continue."
+      : "No tools provided. Please add at least one AI tool to begin your audit.";
     return {
       tools: [],
       totalCurrentSpend: 0,
@@ -309,15 +355,35 @@ export function generateAggregateAudit(
       totalAnnualSavings: 0,
       overallOptimizationScore: 100,
       priorityRecommendations: [],
-      summary: "No tools provided. Please add at least one AI tool to begin your audit.",
-      roiEstimate: 0,
+      summary,
+      savingsRate: 0,
       teamEfficiencyScore: 100,
       enhancedRecommendations: [],
     };
   }
 
-  const toolResults = validTools.map((t) =>
-    auditSingleTool(t.tool, t.spend, t.users)
+  // Duplicate entries for the same product would be audited independently and
+  // inflate savings: ChatGPT twice would claim a Free downgrade on BOTH. The
+  // same product is one subscription surface, so duplicate rows are merged
+  // into a single audited tool (spend and seats are summed; the first row's
+  // explicit plan wins when present). This is the only place deduping lives —
+  // the persisted Audit row then matches exactly what the engine audited.
+  const deduped = validTools.reduce<
+    Record<string, { tool: string; spend: number; users: number; plan?: string }>
+  >((acc, t) => {
+    const existing = acc[t.tool];
+    if (existing) {
+      existing.spend += t.spend;
+      existing.users += t.users;
+    } else {
+      acc[t.tool] = { tool: t.tool, spend: t.spend, users: t.users, plan: t.plan };
+    }
+    return acc;
+  }, {});
+  const mergedTools = Object.values(deduped);
+
+  const toolResults = mergedTools.map((t) =>
+    auditSingleTool(t.tool, t.spend, t.users, date, t.plan)
   );
 
   const totalCurrentSpend = toolResults.reduce((sum, t) => sum + t.currentSpend, 0);
@@ -353,14 +419,15 @@ export function generateAggregateAudit(
     overpayingCount
   );
 
-  // ROI estimate
-  const roiEstimate = totalCurrentSpend > 0
-    ? Math.round((totalSavings * 12 / totalCurrentSpend) * 100)
+  // Savings Rate: monthly savings / current monthly spend * 100 (compare like
+  // to like; never call a subscription cost reduction an "ROI").
+  const savingsRate = totalCurrentSpend > 0
+    ? Math.round((totalSavings / totalCurrentSpend) * 100)
     : 0;
 
-  // Team efficiency score (weighted by spend)
+  // Team efficiency score (only fully-Optimized tools count)
   const optimizedCount = toolResults.filter(
-    (t) => t.status !== "Overpaying"
+    (t) => t.status === "Optimized"
   ).length;
   const teamEfficiencyScore = toolResults.length > 0
     ? Math.round((optimizedCount / toolResults.length) * 100)
@@ -376,8 +443,8 @@ export function generateAggregateAudit(
       severity: t.savings >= 50 ? "critical" : t.savings >= 20 ? "moderate" : "minor",
       impact: t.savings,
       action: t.recommendation,
-      currentPlan: "Current",
-      recommendedPlan: "Optimized",
+      currentPlan: t.currentPlan || "Current",
+      recommendedPlan: t.recommendedPlan || "Optimized",
     }));
 
   return {
@@ -389,7 +456,7 @@ export function generateAggregateAudit(
     overallOptimizationScore,
     priorityRecommendations,
     summary,
-    roiEstimate,
+    savingsRate,
     teamEfficiencyScore,
     enhancedRecommendations,
   };

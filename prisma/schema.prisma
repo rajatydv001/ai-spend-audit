@@ -34,37 +34,39 @@ enum NotificationType {
 }
 
 model User {
-  id               String             @id @default(cuid())
-  email            String             @unique
+  id               String            @id @default(cuid())
+  email            String            @unique
   emailVerified    DateTime?
+  passwordHash     String?
   name             String?
   image            String?
-  currency         String             @default("USD")
-  teamSize         Int                @default(1)
+  currency         String            @default("USD")
+  teamSize         Int               @default(1)
   organizationId   String?
-  organization     Organization?      @relation(fields: [organizationId], references: [id])
-  role             UserRole           @default(ANALYST)
-  subscriptionId   String?            @unique
-  subscription     Subscription?      @relation(fields: [subscriptionId], references: [id])
-  onboarded        Boolean            @default(false)
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  organization     Organization?     @relation(fields: [organizationId], references: [id])
+  role             UserRole          @default(ANALYST)
+  isPlatformAdmin  Boolean           @default(false)
+  subscriptionId   String?           @unique
+  subscription     Subscription?     @relation(fields: [subscriptionId], references: [id])
+  onboarded        Boolean           @default(false)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
   audits           Audit[]
   savedReports     SavedReport[]
   notifications    Notification[]
   notificationLogs NotificationLog[]
-  sentInvites      Invite[]           @relation("SentInvites")
-  receivedInvites  Invite[]           @relation("ReceivedInvites")
+  sentInvites      Invite[]          @relation("SentInvites")
+  receivedInvites  Invite[]          @relation("ReceivedInvites")
   auditLogs        AuditLog[]
 }
 
 model Organization {
-  id          String              @id @default(cuid())
+  id          String       @id @default(cuid())
   name        String
-  slug        String              @unique
+  slug        String       @unique
   logo        String?
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
   members     User[]
   invites     Invite[]
   audits      Audit[]
@@ -72,95 +74,111 @@ model Organization {
 }
 
 model Department {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   name           String
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime @default(now())
+  createdAt      DateTime     @default(now())
   auditLogs      AuditLog[]
+
   @@unique([organizationId, name])
 }
 
 model Invite {
-  id           String          @id @default(cuid())
-  email        String
-  role         UserRole        @default(VIEWER)
+  id             String       @id @default(cuid())
+  email          String
+  role           UserRole     @default(VIEWER)
   organizationId String
-  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  senderId     String
-  sender       User            @relation("SentInvites", fields: [senderId], references: [id])
-  recipientId  String?
-  recipient    User?           @relation("ReceivedInvites", fields: [recipientId], references: [id])
-  token        String          @unique
-  acceptedAt   DateTime?
-  expiresAt    DateTime
-  createdAt    DateTime        @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation("SentInvites", fields: [senderId], references: [id])
+  recipientId    String?
+  recipient      User?        @relation("ReceivedInvites", fields: [recipientId], references: [id])
+  token          String       @unique
+  acceptedAt     DateTime?
+  declinedAt     DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
 }
 
 model Subscription {
-  id              String             @id @default(cuid())
-  plan            SubscriptionPlan   @default(FREE)
-  status          SubscriptionStatus @default(TRIALING)
-  stripeCustomerId String?
+  id                   String             @id @default(cuid())
+  plan                 SubscriptionPlan   @default(FREE)
+  status               SubscriptionStatus @default(TRIALING)
+  stripeCustomerId     String?            @unique
   stripeSubscriptionId String?
-  stripePriceId    String?
-  currentPeriodStart DateTime?
-  currentPeriodEnd   DateTime?
-  trialEndsAt      DateTime?
-  canceledAt       DateTime?
-  auditLimit       Int                @default(5)
-  exportLimit      Int                @default(3)
-  aiRecommendations Boolean           @default(false)
-  teamCollaboration Boolean           @default(false)
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  user             User?
-  billingHistory   BillingHistory[]
+  stripePriceId        String?
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  trialEndsAt          DateTime?
+  canceledAt           DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  user                 User?
+  billingHistory       BillingHistory[]
 }
 
 model BillingHistory {
-  id              String             @id @default(cuid())
-  subscriptionId  String
-  subscription    Subscription       @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  amount          Int
-  currency        String             @default("usd")
-  status          String
-  stripeInvoiceId String?
+  id               String       @id @default(cuid())
+  subscriptionId   String
+  subscription     Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  amount           Int
+  currency         String       @default("usd")
+  status           String
+  stripeInvoiceId  String?       @unique
   stripeReceiptUrl String?
-  description     String
-  periodStart     DateTime?
-  periodEnd       DateTime?
-  createdAt       DateTime           @default(now())
+  description      String
+  periodStart      DateTime?
+  periodEnd        DateTime?
+  createdAt        DateTime     @default(now())
+
+  @@index([subscriptionId])
+}
+
+// Deduplicated Stripe webhook events. Stripe delivers events at-least-once, so
+// every processed `event.id` is recorded here (unique). Idempotent handling
+// skips any event whose id is already present and rolls back the marker on
+// failure so Stripe can retry safely.
+model StripeEvent {
+  id        String   @id @default(cuid())
+  eventId   String   @unique
+  type      String
+  createdAt DateTime @default(now())
 }
 
 model Notification {
-  id       String           @id @default(cuid())
-  userId   String
-  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type     NotificationType
-  enabled  Boolean          @default(true)
-  email    String?
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  enabled   Boolean          @default(true)
+  email     String?
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
+
   @@unique([userId, type])
 }
 
 model NotificationLog {
-  id         String           @id @default(cuid())
-  userId     String
-  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type       NotificationType
-  title      String
-  message    String
-  read       Boolean          @default(false)
-  sentAt     DateTime?
-  createdAt  DateTime         @default(now())
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  message   String
+  read      Boolean          @default(false)
+  sentAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, createdAt])
 }
 
 model AuditLog {
-  id           String     @id @default(cuid())
+  id           String      @id @default(cuid())
   userId       String?
-  user         User?      @relation(fields: [userId], references: [id])
+  user         User?       @relation(fields: [userId], references: [id])
   action       String
   entity       String
   entityId     String?
@@ -168,27 +186,33 @@ model AuditLog {
   ipAddress    String?
   departmentId String?
   department   Department? @relation(fields: [departmentId], references: [id])
-  createdAt    DateTime   @default(now())
+  createdAt    DateTime    @default(now())
+
+  @@index([departmentId])
+  @@index([createdAt])
 }
 
 model Audit {
-  id                 String     @id @default(cuid())
-  userId             String?
-  organizationId     String?
-  department         String?
-  totalCurrentSpend  Float
+  id                  String        @id @default(cuid())
+  userId              String?
+  organizationId      String?
+  department          String?
+  totalCurrentSpend   Float
   totalOptimizedSpend Float
-  totalSavings       Float
-  totalAnnualSavings Float
-  optimizationScore  Float
-  summary            String
-  resultData         String
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
-  user               User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
-  organization       Organization? @relation(fields: [organizationId], references: [id])
-  tools              AuditTool[]
-  savedReports       SavedReport[]
+  totalSavings        Float
+  totalAnnualSavings  Float
+  optimizationScore   Float
+  summary             String
+  resultData          String
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  user                User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organization        Organization? @relation(fields: [organizationId], references: [id])
+  tools               AuditTool[]
+  savedReports        SavedReport[]
+
+  @@index([userId, createdAt])
+  @@index([organizationId, createdAt])
 }
 
 model AuditTool {
@@ -201,6 +225,8 @@ model AuditTool {
   savings        Float
   recommendation String
   audit          Audit  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@index([auditId])
 }
 
 model SavedReport {
@@ -212,4 +238,52 @@ model SavedReport {
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   audit     Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([auditId])
+}
+
+// Versioned AI-tool pricing catalog.
+//
+// Every row is one immutable pricing version for a (vendor, product, plan,
+// billingCadence) combination — monthly and annual are billing VARIANTS of the
+// same logical plan and share the same `plan` name.  A price change NEVER
+// overwrites an existing row: the old version's `validUntil` is closed and a
+// new version with a new `validFrom` is inserted.  Full history is therefore
+// preserved.
+//
+// Resolution (active version for a given date `d`) is:
+//   validFrom <= d AND (validUntil IS NULL OR d < validUntil)
+//
+// Rules:
+//   - Custom/contact-sales pricing -> price 0, billingType "CUSTOM", never estimated.
+//   - Usage-based pricing         -> billingType "USAGE", price 0, usageModel set.
+//   - sourceStatus keeps the audit trail of verification provenance.
+model PricingCatalog {
+  id                String   @id @default(cuid())
+  vendor            String
+  product           String
+  plan              String
+  billingType       String // FLAT | PER_USER | USAGE | CUSTOM
+  billingCadence    String // MONTHLY | ANNUAL | DAILY | ONCE | USAGE_BASED | NONE
+  price             Float
+  currency          String   @default("USD")
+  perUser           Boolean  @default(true)
+  segment           String   @default("individual") // free | individual | team | business | enterprise
+  power             Boolean  @default(false)
+  minSeats          Int?
+  maxSeats          Int?
+  usageModel        String // NONE | METERED | TOKEN_BASED | CREDIT_BASED | SEAT_BASED | CUSTOM
+  officialPricingUrl String?
+  sourceStatus      String // VERIFIED | UNVERIFIED | STALE | CUSTOM
+  lastVerifiedAt    DateTime?
+  validFrom         DateTime
+  validUntil        DateTime?
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([vendor, plan, validFrom, validUntil])
+  @@index([product, plan, active])
+  @@index([vendor, plan, active])
 }

@@ -2,16 +2,17 @@
 
 import { useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { staggerContainer, slideUp } from "@/lib/motion-variants";
 import { useAuditStore } from "@/lib/store/audit-store";
 import type { AggregateAuditResult } from "@/lib/audit-engine";
-import { generatePdfReport } from "@/lib/pdf-export";
 import TabNavigation from "@/components/dashboard/tab-navigation";
 import ExecutiveReport from "@/components/dashboard/executive-report";
 import RecommendationsEngine from "@/components/dashboard/recommendations-engine";
 import TeamAnalytics from "@/components/dashboard/team-analytics";
 import SavingsBreakdown from "@/components/dashboard/savings-breakdown";
 import EmptyState from "@/components/ui/empty-state";
+import toast from "react-hot-toast";
 
 interface ChartsProps {
   result: AggregateAuditResult | null;
@@ -25,16 +26,39 @@ const tabComponents: Record<string, React.FC<{ result: AggregateAuditResult }>> 
 };
 
 export default function Charts({ result }: ChartsProps) {
+  const router = useRouter();
   const activeTab = useAuditStore((s) => s.activeTab);
   const setActiveTab = useAuditStore((s) => s.setActiveTab);
   const isExporting = useAuditStore((s) => s.isExporting);
   const setIsExporting = useAuditStore((s) => s.setIsExporting);
+  const createdAuditId = useAuditStore((s) => s.createdAuditId);
 
   const handleExport = useCallback(async () => {
     if (!result) return;
+    if (!createdAuditId) {
+      toast.error("Save your audit to export the report.");
+      return;
+    }
     setIsExporting(true);
     try {
-      const blob = await generatePdfReport(result);
+      const res = await fetch("/api/reports/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auditId: createdAuditId }),
+      });
+      if (res.status === 401) {
+        toast.error("Sign in to export reports.");
+        router.push("/login");
+        return;
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error ?? "Export limit reached. Upgrade your plan to export more reports.");
+        return;
+      }
+      // Use the server-generated PDF blob and the quota header; the response is
+      // NOT JSON, so parsing it as such would silently fail the download.
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -43,10 +67,11 @@ export default function Charts({ result }: ChartsProps) {
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error("PDF export failed:", err);
+      toast.error("PDF export failed. Please try again.");
     } finally {
       setIsExporting(false);
     }
-  }, [result, setIsExporting]);
+  }, [result, createdAuditId, router, setIsExporting]);
 
   if (!result || result.tools.length === 0) {
     return (

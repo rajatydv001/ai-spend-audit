@@ -1,39 +1,40 @@
 import { NextResponse } from "next/server";
-import { createAudit, getAuditsByUser, createAuditSchema } from "@/lib/services/audit-service";
-import { checkAuditLimit } from "@/lib/services/subscription-service";
+import { createAuditWithinLimit, getAuditsByUser, createAuditInputSchema } from "@/lib/services/audit-service";
 import { createAuditLog } from "@/lib/services/audit-log";
-import { rateLimit } from "@/lib/services/rate-limit";
-import { DEFAULT_USER_ID } from "@/lib/defaults";
+import { rateLimitOrThrow, getClientIp } from "@/lib/services/rate-limit";
+import { requireUserId } from "@/lib/auth/dal";
+import { requireUserOrg, requireOrgPermission, requireRole } from "@/lib/auth/authorization";
+import { parseBody, withErrorHandling } from "@/lib/errors";
 
-export async function GET() {
-  const audits = await getAuditsByUser("");
+export const GET = withErrorHandling(async () => {
+  const userId = await requireUserId();
+  const user = await requireUserOrg(userId);
+  await requireRole(userId, "ADMIN", "ANALYST", "VIEWER");
+
+  const audits = await getAuditsByUser(user.id, user.organizationId);
   return NextResponse.json(audits);
-}
+});
 
-export async function POST(request: Request) {
-  const ip = request.headers.get("x-forwarded-for") || "anonymous";
-  const rateCheck = rateLimit("audit:anonymous", 10, 60000);
-  if (!rateCheck.ok) {
-    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+export const POST = withErrorHandling(async (request: Request) => {
+  const userId = await requireUserId();
+  const user = await requireUserOrg(userId);
+  const orgId = user.organizationId;
+  if (orgId) {
+    await requireOrgPermission(userId, orgId, "audit:create");
+  } else {
+    await requireRole(userId, "ADMIN", "ANALYST");
   }
 
-  const withinLimit = await checkAuditLimit(DEFAULT_USER_ID);
-  if (!withinLimit) {
-    return NextResponse.json(
-      { error: "Audit limit reached. Upgrade your plan for more audits." },
-      { status: 403 }
-    );
-  }
+  const ip = getClientIp(request);
+  await rateLimitOrThrow(`audit:${userId}`, 10, 60000);
 
-  const body = await request.json();
-  const parsed = createAuditSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  }
+  const data = await parseBody(request, createAuditInputSchema);
+  // Plan limit and audit creation happen atomically server-side; the client can
+  // neither choose the plan nor slip past the limit with concurrent requests.
+  const audit = await createAuditWithinLimit(userId, data, orgId || undefined);
 
-  const audit = await createAudit(DEFAULT_USER_ID, parsed.data);
-
-  await createAuditLog({ userId: DEFAULT_USER_ID,
+  await createAuditLog({
+    userId,
     action: "audit.created",
     entity: "audit",
     entityId: audit.id,
@@ -41,4 +42,6 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json(audit, { status: 201 });
-}
+});
+
+export const runtime = "nodejs";

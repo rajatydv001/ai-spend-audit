@@ -1,1 +1,3 @@
-export const DEFAULT_USER_ID = "default-user-id-000001";
+// Placeholder for future defaults. Removed DEFAULT_USER_ID in favor of session-based identity.
+export {};
+

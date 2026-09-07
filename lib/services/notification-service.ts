@@ -19,11 +19,16 @@ export async function getUnreadNotificationCount(userId: string) {
   });
 }
 
-export async function getNotifications(userId: string) {
+export async function getNotifications(
+  userId: string,
+  take: number = 50,
+  cursor?: string
+) {
   return prisma.notificationLog.findMany({
     where: { userId },
     orderBy: { createdAt: "desc" },
-    take: 50,
+    take,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   });
 }
 
@@ -55,6 +60,57 @@ export async function sendEmail(to: string, subject: string, html: string) {
     });
   } catch (error) {
     console.error("Failed to send email:", error);
+  }
+}
+
+export type InviteEmailStatus = "sent" | "not_configured" | "delivery_failed";
+
+/**
+ * Delivers a team-invitation email and reports the real outcome. Never claims
+ * an email was sent when it was not: if the Resend key is missing this returns
+ * `not_configured`, and if the provider call fails it returns
+ * `delivery_failed`. The invite URL is safe to share manually either way.
+ */
+export async function sendInviteEmail(args: {
+  to: string;
+  inviteUrl: string;
+  organizationName: string;
+  role: string;
+  senderName?: string | null;
+}): Promise<{ status: InviteEmailStatus }> {
+  if (!env.RESEND_API_KEY) {
+    console.error(
+      "[email] RESEND_API_KEY is not configured; team-invitation email NOT sent for " +
+        args.to +
+        ". Share the invite URL manually."
+    );
+    return { status: "not_configured" };
+  }
+
+  const senderLine = args.senderName ? `, by ${args.senderName}` : "";
+  const roleLabel = args.role === "ADMIN" ? "an Admin" : args.role === "ANALYST" ? "an Analyst" : "a Viewer";
+
+  try {
+    const { Resend } = await import("resend");
+    const resend = new Resend(env.RESEND_API_KEY);
+    await resend.emails.send({
+      from: "AI Spend Audit <noreply@ai-spend-audit.com>",
+      to: args.to,
+      subject: `You're invited to join ${args.organizationName} on AI Spend Audit`,
+      html: `
+        <h2>You've been invited to ${args.organizationName}</h2>
+        <p>You've been invited to join <strong>${args.organizationName}</strong> as <strong>${roleLabel}</strong>${senderLine}.</p>
+        <p>This invitation expires in 7 days and can be used once.</p>
+        <p><a href="${args.inviteUrl}">Accept the invitation</a></p>
+        <p>If the button does not work, copy and paste this link into your browser:</p>
+        <p><a href="${args.inviteUrl}">${args.inviteUrl}</a></p>
+        <p style="color:#888;font-size:12px">AI Spend Audit — AI cost optimization for your teams.</p>
+      `,
+    });
+    return { status: "sent" };
+  } catch (error) {
+    console.error("Failed to send team-invitation email:", error);
+    return { status: "delivery_failed" };
   }
 }
 

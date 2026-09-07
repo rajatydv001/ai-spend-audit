@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { handleStripeWebhook } from "@/lib/services/subscription-service";
+import { withErrorHandling } from "@/lib/errors";
 
-export async function POST(request: Request) {
-  if (!env.STRIPE_WEBHOOK_SECRET) {
+export const POST = withErrorHandling(async (request: Request) => {
+  if (!env.STRIPE_WEBHOOK_SECRET || !env.STRIPE_SECRET_KEY) {
     return NextResponse.json({ error: "Webhook not configured" }, { status: 400 });
   }
 
@@ -23,4 +24,6 @@ export async function POST(request: Request) {
   await handleStripeWebhook(event);
 
   return NextResponse.json({ received: true });
-}
+});
+
+export const runtime = "nodejs";

@@ -50,7 +50,7 @@
 ### 🛡️ Enterprise Security
 - Rate limiting on API endpoints
 - Comprehensive audit logging
-- NextAuth v5 with Google + GitHub OAuth
+- Email + password authentication (bcrypt + signed session cookies)
 - Protected dashboard routes
 
 ## Tech Stack
@@ -59,7 +59,7 @@
 |-------|-----------|
 | **Framework** | Next.js 16 (App Router, Turbopack) |
 | **Language** | TypeScript (strict mode) |
-| **Authentication** | NextAuth v5 (Auth.js) + Prisma Adapter |
+| **Authentication** | Email + password (bcrypt) with signed HTTP-only session cookies |
 | **Database** | PostgreSQL + Prisma 7 ORM |
 | **UI** | Tailwind CSS 4, Framer Motion 12 |
 | **Charts** | Recharts 3 |
@@ -101,12 +101,12 @@
 │   │   ├── rate-limit.ts
 │   │   └── subscription-service.ts
 │   ├── audit-engine.ts  # Core optimization engine
-│   ├── auth.ts          # NextAuth configuration
+│   ├── auth/            # Session, DAL, RBAC authorization, auth actions
 │   ├── db.ts            # Prisma client singleton
 │   └── env.ts           # Zod validation
 ├── prisma/
 │   └── schema.prisma    # Database schema (13 models)
-└── middleware.ts         # Route protection
+└── proxy.ts             # Route protection
 ```
 
 ## Submission Documents
@@ -139,13 +139,7 @@ This repository now includes the following supporting documentation required for
 ```bash
 # Required
 DATABASE_URL="postgresql://user:password@host:5432/db"
-AUTH_SECRET="your-random-secret-at-least-32-chars"
-
-# OAuth (at least one required)
-AUTH_GOOGLE_ID=""
-AUTH_GOOGLE_SECRET=""
-AUTH_GITHUB_ID=""
-AUTH_GITHUB_SECRET=""
+SESSION_SECRET="your-random-secret-at-least-32-chars"
 
 # Optional — feature falls back gracefully when missing
 OPENAI_API_KEY=""

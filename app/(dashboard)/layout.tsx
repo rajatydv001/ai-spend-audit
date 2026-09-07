@@ -1,11 +1,12 @@
-"use client";
-
 import DashboardShell from "@/components/layout/dashboard-shell";
+import { getSessionUser } from "@/lib/auth/dal";
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <DashboardShell>{children}</DashboardShell>;
+  const user = await getSessionUser();
+
+  return <DashboardShell user={user}>{children}</DashboardShell>;
 }

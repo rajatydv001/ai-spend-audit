@@ -4,6 +4,10 @@
 - Initialized AI Spend Audit repository with Next.js 16, TypeScript, Prisma, Stripe, and Tailwind.
 - Built the landing page, feature sections, audit form, and hero flow.
 - Implemented authentication using NextAuth with Google and GitHub providers.
+
+> **Correction (2026-09-05):** The shipped authentication is email + password
+> (bcrypt hashes + signed HTTP-only session cookies via `lib/auth/*` and
+> `proxy.ts`). No NextAuth or Google/GitHub OAuth is present in the codebase.
 - Added the core audit engine and audit result visualizations.
 
 ## Day 2

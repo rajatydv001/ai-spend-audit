@@ -6,8 +6,17 @@ import Topbar from "@/components/layout/topbar";
 
 export default function DashboardShell({
   children,
+  user,
 }: {
   children: React.ReactNode;
+  user?: {
+    id: string;
+    email: string;
+    name: string | null;
+    image: string | null;
+    role: string;
+    isPlatformAdmin?: boolean;
+  } | null;
 }) {
   const [isSidebarOpen, setSidebarOpen] = useState(false);
 
@@ -27,9 +36,10 @@ export default function DashboardShell({
       <Sidebar
         isOpen={isSidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        user={user ?? undefined}
       />
       <div className="flex flex-1 flex-col">
-        <Topbar onToggleSidebar={() => setSidebarOpen((v) => !v)} />
+        <Topbar onToggleSidebar={() => setSidebarOpen((v) => !v)} user={user ?? undefined} />
         <main className="flex-1 overflow-auto">
           {children}
         </main>

@@ -1,24 +1,21 @@
 import { NextResponse } from "next/server";
 import { getUserPreferences, updateUserPreferences } from "@/lib/services/audit-service";
-import { z } from "zod";
+import { requireUserId } from "@/lib/auth/dal";
+import { parseBody, withErrorHandling } from "@/lib/errors";
+import { preferencesSchema } from "@/lib/validation/schemas";
 
-const preferencesSchema = z.object({
-  currency: z.string().optional(),
-  teamSize: z.number().optional(),
+export const GET = withErrorHandling(async () => {
+  const userId = await requireUserId();
+  const prefs = await getUserPreferences(userId);
+  return NextResponse.json(prefs);
 });
 
-export async function GET() {
-  const prefs = await getUserPreferences("");
-  return NextResponse.json(prefs);
-}
+export const PUT = withErrorHandling(async (request: Request) => {
+  const userId = await requireUserId();
+  const body = await parseBody(request, preferencesSchema);
 
-export async function PUT(request: Request) {
-  const body = await request.json();
-  const parsed = preferencesSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  }
-
-  const updated = await updateUserPreferences("", parsed.data);
+  const updated = await updateUserPreferences(userId, body);
   return NextResponse.json(updated);
-}
+});
+
+export const runtime = "nodejs";

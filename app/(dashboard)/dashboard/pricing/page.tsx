@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { staggerContainer, staggerItem } from "@/lib/motion-variants";
 import PricingIntelligence from "@/components/pricing/pricing-intelligence";
+import PricingCatalog from "@/components/pricing/pricing-catalog";
 
 export default function PricingPage() {
   return (
@@ -18,6 +19,7 @@ export default function PricingPage() {
       </motion.div>
 
       <PricingIntelligence />
+      <PricingCatalog />
     </motion.div>
   );
 }

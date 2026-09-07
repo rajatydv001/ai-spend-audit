@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { detectRedundantSubscriptions, estimateAnnualSpend, compareToolPricing } from "@/lib/services/pricing-intelligence";
+import { detectRedundantSubscriptions, estimateAnnualSpend } from "@/lib/services/pricing-intelligence";
+import { TOOL_PLAN_NAMES } from "@/lib/pricing/plan-lists";
 
 interface ToolEntry {
   name: string;
@@ -63,7 +64,7 @@ export default function PricingIntelligence() {
                   }}
                   className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none"
                 >
-                  {["Free", "Pro", "Team", "Enterprise", "Plus", "Max", "Hobby", "Business", "Individual", "Ultra"].map((p) => (
+                  {(TOOL_PLAN_NAMES[tool.name] ?? ["Free"]).map((p) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>

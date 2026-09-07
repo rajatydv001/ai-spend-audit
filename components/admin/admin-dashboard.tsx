@@ -41,15 +41,12 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/admin/stats?type=overview").then((r) => r.json()),
-      fetch("/api/admin/stats?type=audit-volume").then((r) => r.json()),
-      fetch("/api/admin/stats?type=audit-logs").then((r) => r.json()),
-    ])
-      .then(([s, v, l]) => {
-        setStats(s);
-        setAuditVolume(v);
-        setAuditLogs(l);
+    fetch("/api/admin/stats?type=all")
+      .then((r) => r.json())
+      .then((data) => {
+        setStats(data.overview || null);
+        setAuditVolume(data.auditVolume || []);
+        setAuditLogs(data.auditLogs || []);
       })
       .catch(() => {})
       .finally(() => setLoading(false));

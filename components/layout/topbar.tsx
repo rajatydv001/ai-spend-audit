@@ -2,8 +2,10 @@
 
 export default function Topbar({
   onToggleSidebar,
+  user,
 }: {
   onToggleSidebar: () => void;
+  user?: { name: string | null; email: string; image: string | null };
 }) {
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-2xl">
@@ -22,6 +24,25 @@ export default function Topbar({
         </button>
 
         <div className="hidden md:block" />
+
+        <div className="hidden items-center gap-3 sm:flex">
+          {user && (
+            <>
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-sm font-medium text-white">
+                {user.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={user.image} alt={user.name ?? "User"} className="h-8 w-8 rounded-full object-cover" />
+                ) : (
+                  (user.name?.[0] ?? user.email[0] ?? "?").toUpperCase()
+                )}
+              </div>
+              <div className="hidden lg:block">
+                <p className="text-sm font-medium text-white">{user.name ?? "User"}</p>
+                <p className="text-xs text-gray-500">{user.email}</p>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </header>
   );

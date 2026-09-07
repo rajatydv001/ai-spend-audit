@@ -127,14 +127,14 @@ export async function generateVendorConsolidationSuggestions(
   }
 }
 
-export async function generateROIAnalysis(auditData: AuditData): Promise<string> {
+export async function generateSavingsAnalysis(auditData: AuditData): Promise<string> {
   const openai = await getOpenAI();
   if (!openai) {
     const annualSavings = auditData.totalSavings * 12;
-    const roi = auditData.totalCurrentSpend > 0
-      ? ((annualSavings / auditData.totalCurrentSpend) * 100).toFixed(1)
+    const savingsRate = auditData.totalCurrentSpend > 0
+      ? ((auditData.totalSavings / auditData.totalCurrentSpend) * 100).toFixed(1)
       : "N/A";
-    return `Based on your current spend of $${auditData.totalCurrentSpend.toLocaleString()}/month, optimizing could save $${auditData.totalSavings.toLocaleString()}/month ($${annualSavings.toLocaleString()}/year). Your estimated ROI is ${roi}%.`;
+    return `Based on your current spend of $${auditData.totalCurrentSpend.toLocaleString()}/month, optimizing could save $${auditData.totalSavings.toLocaleString()}/month ($${annualSavings.toLocaleString()}/year). Your savings rate is ${savingsRate}%.`;
   }
 
   try {
@@ -143,7 +143,7 @@ export async function generateROIAnalysis(auditData: AuditData): Promise<string>
       messages: [
         {
           role: "system",
-          content: "You are a financial analyst. Write a detailed ROI analysis paragraph based on the audit data.",
+          content: "You are a financial analyst. Write a detailed savings analysis paragraph based on the audit data, describing the monthly savings rate (monthly savings divided by current monthly spend).",
         },
         {
           role: "user",
@@ -156,7 +156,7 @@ export async function generateROIAnalysis(auditData: AuditData): Promise<string>
 
     return response.choices[0]?.message?.content || "";
   } catch {
-    return `ROI analysis available with OpenAI API key configured.`;
+    return `Savings analysis available with OpenAI API key configured.`;
   }
 }
 

@@ -1,33 +1,28 @@
 import { NextResponse } from "next/server";
 import { compareToolPricing, detectRedundantSubscriptions, estimateAnnualSpend } from "@/lib/services/pricing-intelligence";
+import { parseBody, withErrorHandling } from "@/lib/errors";
+import { rateLimitOrThrow } from "@/lib/services/rate-limit";
+import { requireUserId } from "@/lib/auth/dal";
+import { requireRole } from "@/lib/auth/authorization";
+import { pricingCompareActionSchema } from "@/lib/validation/schemas";
 
-export async function POST(request: Request) {
-  const body = await request.json();
-  const { action } = body;
+export const POST = withErrorHandling(async (request: Request) => {
+  // Same centralized authorization as every other pricing read: any signed-in
+  // role may consult the (public) pricing surface, anonymous callers cannot.
+  const userId = await requireUserId();
+  await requireRole(userId, "ADMIN", "ANALYST", "VIEWER");
 
-  switch (action) {
-    case "compare": {
-      const { tool, plan, users } = body;
-      if (!tool || !plan || !users) {
-        return NextResponse.json({ error: "tool, plan, users required" }, { status: 400 });
-      }
-      return NextResponse.json(compareToolPricing(tool, plan, users));
-    }
-    case "redundant": {
-      const { tools } = body;
-      if (!tools) {
-        return NextResponse.json({ error: "tools array required" }, { status: 400 });
-      }
-      return NextResponse.json(detectRedundantSubscriptions(tools));
-    }
-    case "project": {
-      const { currentSpend, growthRate } = body;
-      if (!currentSpend) {
-        return NextResponse.json({ error: "currentSpend required" }, { status: 400 });
-      }
-      return NextResponse.json(estimateAnnualSpend(currentSpend, growthRate));
-    }
-    default:
-      return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  await rateLimitOrThrow(`pricing:compare:${userId}`, 60, 60000);
+
+  const body = await parseBody(request, pricingCompareActionSchema);
+
+  switch (body.action) {
+    case "compare":
+      return NextResponse.json(compareToolPricing(body.tool, body.plan, body.users));
+    case "redundant":
+      return NextResponse.json(detectRedundantSubscriptions(body.tools));
+    case "project":
+      return NextResponse.json(estimateAnnualSpend(body.currentSpend, body.growthRate));
   }
-}
+});
+export const runtime = "nodejs";

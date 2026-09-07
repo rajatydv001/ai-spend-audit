@@ -5,7 +5,9 @@ AI Spend Audit is built as a full-stack SaaS application using Next.js App Route
 
 ## Key components
 - **Frontend:** Next.js + Tailwind CSS delivers the landing page, audit form, dashboard, and team management UI.
-- **Authentication:** NextAuth v5 provides OAuth sign-in with Google and GitHub.
+- **Authentication:** email + password sign-in with bcrypt password hashes and
+  short-lived signed HTTP-only session cookies (`lib/auth/*`, protected via
+  `proxy.ts`).
 - **Backend API:** App Router API routes handle audits, analytics, organizations, billing, and notifications.
 - **Database:** Prisma models users, organizations, audits, subscriptions, notifications, and audit logs.
 - **Billing & Payments:** Stripe manages checkout, portal, and webhook events for subscription lifecycle.
@@ -14,8 +16,10 @@ AI Spend Audit is built as a full-stack SaaS application using Next.js App Route
 
 ## Data flow
 1. User submits an audit form on the landing page.
-2. The frontend sends the audit payload to `/api/audits`.
-3. The audit service validates, stores, and calculates initial results.
+2. The frontend sends only the raw tool inputs (tool, plan, spend, seats) to `/api/audits`.
+3. The audit service validates the inputs and the server recomputes every result
+   (totals, savings, Savings Rate, optimization score, recommendations) with the
+   audit engine before persisting — client-supplied calculated values are never trusted.
 4. AI insight endpoints optionally call OpenAI for enhanced recommendations.
 5. Results are stored in the database and surfaced in the dashboard.
 6. Stripe handles subscription creations and updates via `/api/stripe/webhook`.

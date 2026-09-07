@@ -19,8 +19,8 @@ export default function ExecutiveReport({ result }: ExecutiveReportProps) {
     ? ((result.totalSavings / result.totalCurrentSpend) * 100).toFixed(1)
     : "0";
 
-  const roi = result.totalCurrentSpend > 0
-    ? Math.round((result.totalAnnualSavings / result.totalCurrentSpend) * 100)
+  const savingsRate = result.totalCurrentSpend > 0
+    ? Math.round((result.totalSavings / result.totalCurrentSpend) * 100)
     : 0;
 
   const projectionData = useMemo(() => {
@@ -90,7 +90,7 @@ export default function ExecutiveReport({ result }: ExecutiveReportProps) {
           prefix="$"
           formatter={(v) => v.toLocaleString()}
           gradient="from-emerald-500/10 to-black/40"
-          delta={`${roi}% ROI`}
+          delta={`${savingsRate}% savings rate`}
         />
       </div>
 
@@ -121,9 +121,9 @@ export default function ExecutiveReport({ result }: ExecutiveReportProps) {
           </p>
         </div>
         <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3 text-center">
-          <p className="text-xs text-gray-500 uppercase tracking-wider">ROI Estimate</p>
-          <p className="mt-2 text-2xl font-bold text-emerald-400">{roi}%</p>
-          <p className="mt-1 text-xs text-gray-400">Annual return on investment</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider">Savings Rate</p>
+          <p className="mt-2 text-2xl font-bold text-emerald-400">{savingsRate}%</p>
+          <p className="mt-1 text-xs text-gray-400">Monthly savings on current spend</p>
         </div>
         <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3 text-center">
           <p className="text-xs text-gray-500 uppercase tracking-wider">AI Health Status</p>
@@ -173,6 +173,13 @@ export default function ExecutiveReport({ result }: ExecutiveReportProps) {
 
       {/* Summary */}
       <motion.div variants={staggerItem} className="mt-6 rounded-2xl border border-white/10 bg-gradient-to-r from-indigo-500/5 via-white/3 to-transparent p-6">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-white uppercase tracking-wider">Executive Summary</p>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[11px] font-medium text-gray-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            Deterministic analysis · generated on-device
+          </span>
+        </div>
         <p className="text-sm leading-relaxed text-gray-200">
           {result.summary}
         </p>

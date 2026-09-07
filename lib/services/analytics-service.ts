@@ -27,35 +27,31 @@ export async function getSpendingTrends(
 export async function getDepartmentAnalytics(organizationId: string) {
   const departments = await prisma.department.findMany({
     where: { organizationId },
-    include: {
-      auditLogs: true,
-    },
+    select: { name: true },
   });
 
-  const audits = await prisma.audit.findMany({
-    where: { organizationId },
-    orderBy: { createdAt: "desc" },
-    take: 100,
+  const aggregated = await prisma.audit.groupBy({
+    by: ["department"],
+    where: { organizationId, department: { not: null } },
+    _count: { _all: true },
+    _sum: { totalCurrentSpend: true, totalSavings: true },
+    _avg: { optimizationScore: true },
   });
 
-  const deptData = departments.map((dept) => {
-    const deptAudits = audits.filter((a) => a.department === dept.name);
-    const totalSpend = deptAudits.reduce((s, a) => s + a.totalCurrentSpend, 0);
-    const totalSavings = deptAudits.reduce((s, a) => s + a.totalSavings, 0);
-    const avgScore = deptAudits.length > 0
-      ? deptAudits.reduce((s, a) => s + a.optimizationScore, 0) / deptAudits.length
-      : 0;
+  const byDept = new Map(aggregated.map((g) => [g.department, g]));
 
+  return departments.map((dept) => {
+    const agg = byDept.get(dept.name);
     return {
       name: dept.name,
-      auditCount: deptAudits.length,
-      totalSpend: Math.round(totalSpend * 100) / 100,
-      totalSavings: Math.round(totalSavings * 100) / 100,
-      avgScore: Math.round(avgScore * 10) / 10,
+      auditCount: agg?._count._all ?? 0,
+      totalSpend: Math.round((agg?._sum.totalCurrentSpend ?? 0) * 100) / 100,
+      totalSavings: Math.round((agg?._sum.totalSavings ?? 0) * 100) / 100,
+      avgScore: agg?._avg.optimizationScore != null
+        ? Math.round(agg._avg.optimizationScore * 10) / 10
+        : 0,
     };
   });
-
-  return deptData;
 }
 
 export async function getToolAdoptionAnalytics(userId: string) {

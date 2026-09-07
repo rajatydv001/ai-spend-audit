@@ -16,7 +16,18 @@ jobs:
         with:
           node-version: 20
           cache: "npm"
-      - run: npm install
+      - run: npm ci
       - run: npm run lint
       - run: npm test
       - run: npm run build
+        env:
+          # Prod-origin guard: lib/env.ts rejects the localhost default in a
+          # production build, so CI uses a stand-in origin.
+          NEXT_PUBLIC_APP_URL: https://ci.example.com
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # SESSION_SECRET and the Upstash pair are required for a production
+          # build (env.ts fails closed). Configure them as repository secrets;
+          # the build step errors loudly until they exist.
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}

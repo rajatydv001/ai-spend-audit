@@ -4,9 +4,11 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { generateAggregateAudit, type AggregateAuditResult } from "@/lib/audit-engine";
+import { TOOL_PLAN_NAMES } from "@/lib/pricing/plan-lists";
 import { useAuditStore } from "@/lib/store/audit-store";
 import AuditResults from "@/components/audit-results";
 import LoadingSkeleton from "@/components/ui/loading-skeleton";
+import toast from "react-hot-toast";
 
 interface ToolConfig {
   name: string;
@@ -14,46 +16,48 @@ interface ToolConfig {
   category: "SaaS" | "API";
 }
 
+// Plan names come from the pricing catalog (canonical, time-aware) so the form
+// dropdown can never drift from the plans the audit engine actually optimizes.
 const TOOL_CONFIGURATION: Record<string, ToolConfig> = {
   ChatGPT: {
     name: "ChatGPT",
     category: "SaaS",
-    plans: ["Plus", "Team", "Enterprise", "API"],
+    plans: TOOL_PLAN_NAMES.ChatGPT,
   },
   Claude: {
     name: "Claude",
     category: "SaaS",
-    plans: ["Free", "Pro", "Max", "Team", "Enterprise", "API"],
+    plans: TOOL_PLAN_NAMES.Claude,
   },
   Cursor: {
     name: "Cursor",
     category: "SaaS",
-    plans: ["Hobby", "Pro", "Business", "Enterprise"],
+    plans: TOOL_PLAN_NAMES.Cursor,
   },
   Copilot: {
     name: "Copilot",
     category: "SaaS",
-    plans: ["Individual", "Business", "Enterprise"],
+    plans: TOOL_PLAN_NAMES.Copilot,
   },
   Gemini: {
     name: "Gemini",
     category: "SaaS",
-    plans: ["Pro", "Ultra", "API"],
+    plans: TOOL_PLAN_NAMES.Gemini,
   },
   "OpenAI API": {
     name: "OpenAI API",
     category: "API",
-    plans: ["Pay-as-you-go"],
+    plans: TOOL_PLAN_NAMES["OpenAI API"],
   },
   "Anthropic API": {
     name: "Anthropic API",
     category: "API",
-    plans: ["Pay-as-you-go"],
+    plans: TOOL_PLAN_NAMES["Anthropic API"],
   },
   Windsurf: {
     name: "Windsurf",
     category: "SaaS",
-    plans: ["Hobby", "Pro", "Business", "Enterprise"],
+    plans: TOOL_PLAN_NAMES.Windsurf,
   },
 };
 
@@ -75,9 +79,10 @@ export default function AuditForm({ variant = "homepage", onAuditCreated }: { va
 
   const [isGenerating, setIsGenerating] = useState(false);
   const setResult = useAuditStore((s) => s.setResult);
+  const setCreatedAuditId = useAuditStore((s) => s.setCreatedAuditId);
+  const createdAuditId = useAuditStore((s) => s.createdAuditId);
 
   const [auditResult, setAuditResult] = useState<AggregateAuditResult | null>(null);
-  const [createdAuditId, setCreatedAuditId] = useState<string | null>(null);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -264,6 +269,7 @@ export default function AuditForm({ variant = "homepage", onAuditCreated }: { va
                 const auditData = generateAggregateAudit(
                   validEntries.map((entry) => ({
                     tool: entry.tool,
+                    plan: entry.plan || undefined,
                     spend: Number(entry.spend),
                     users: Number(entry.users),
                   }))
@@ -278,26 +284,34 @@ export default function AuditForm({ variant = "homepage", onAuditCreated }: { va
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                      totalCurrentSpend: auditData.totalCurrentSpend,
-                      totalOptimizedSpend: auditData.totalOptimizedSpend,
-                      totalSavings: auditData.totalSavings,
-                      totalAnnualSavings: auditData.totalAnnualSavings,
-                      optimizationScore: auditData.overallOptimizationScore,
-                      summary: auditData.summary,
-                      resultData: JSON.stringify(auditData),
-                      tools: auditData.tools.map((t) => ({
-                        name: t.tool,
-                        status: t.status,
-                        currentSpend: t.currentSpend,
-                        optimizedSpend: t.optimizedSpend,
-                        savings: t.savings,
-                        recommendation: t.recommendation,
+                      tools: validEntries.map((entry) => ({
+                        tool: entry.tool,
+                        plan: entry.plan || undefined,
+                        spend: Number(entry.spend),
+                        users: Number(entry.users),
                       })),
                     }),
                   });
                   if (res.ok) {
                     const created = await res.json();
                     setCreatedAuditId(created.id);
+                  } else if (res.status === 401) {
+                    toast.error(
+                      variant === "homepage"
+                        ? "Sign in to save this audit to your dashboard."
+                        : "Your session expired. Please sign in again.",
+                      { duration: 6000 }
+                    );
+                  } else if (res.status === 403) {
+                    const data = await res.json().catch(() => ({}));
+                    toast.error(data.error ?? "Audit limit reached. Upgrade your plan for more audits.");
+                  } else if (res.status === 409) {
+                    toast.error("This audit was already saved.");
+                  } else if (res.status === 429) {
+                    toast.error("You're moving fast — please wait a moment and try again.", { duration: 6000 });
+                  } else {
+                    const data = await res.json().catch(() => ({}));
+                    toast.error(data.error ?? "Failed to save audit. Please try again.");
                   }
                 } catch (e) {
                   console.error("Failed to save audit:", e);

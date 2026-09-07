@@ -91,7 +91,7 @@ export default function AuditResults({ result }: AuditResultsProps) {
             </div>
             <div className="mt-4">
               <p className="text-4xl font-bold text-emerald-400">${result.totalAnnualSavings}</p>
-              <p className="mt-2 text-xs text-emerald-300/80">{result.roiEstimate}% ROI</p>
+              <p className="mt-2 text-xs text-emerald-300/80">{Math.round(result.savingsRate * 100)}% savings rate</p>
             </div>
           </div>
         </div>
@@ -126,7 +126,12 @@ export default function AuditResults({ result }: AuditResultsProps) {
           </div>
           <div className="space-y-3">
             {result.priorityRecommendations.map((rec, idx) => {
-              const tool = result.tools[idx];
+              // Recommendations are ranked by savings, so they are NOT aligned
+              // with result.tools order. The tool name is the prefix ("Tool:
+              // recommendation") — match on it so the savings badge belongs to
+              // the tool that the recommendation is actually about.
+              const toolName = rec.split(":")[0]?.trim() ?? "";
+              const tool = result.tools.find((t) => t.tool === toolName);
               return (
                 <div key={idx} className="flex gap-4 rounded-xl bg-white/5 border border-white/5 p-4 hover:border-white/10 transition">
                   <div className="flex-shrink-0">

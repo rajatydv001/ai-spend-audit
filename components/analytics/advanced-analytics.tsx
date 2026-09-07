@@ -42,17 +42,13 @@ export default function AdvancedAnalytics() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/analytics/trends?type=trends").then((r) => r.json()),
-      fetch("/api/analytics/trends?type=adoption").then((r) => r.json()),
-      fetch("/api/analytics/trends?type=utilization").then((r) => r.json()),
-      fetch("/api/analytics/trends?type=projection").then((r) => r.json()),
-    ])
-      .then(([t, a, u, p]) => {
-        setTrends(t);
-        setAdoption(a);
-        setUtilization(u);
-        setProjection(p);
+    fetch("/api/analytics/trends?type=all")
+      .then((r) => r.json())
+      .then((data) => {
+        setTrends(data.trends || []);
+        setAdoption(data.adoption || []);
+        setUtilization(data.utilization || null);
+        setProjection(data.projection || null);
       })
       .catch(() => {})
       .finally(() => setLoading(false));

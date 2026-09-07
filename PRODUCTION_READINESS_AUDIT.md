@@ -2,6 +2,22 @@
 **AI Spend Audit Next.js Application**
 Generated: May 2026
 
+> **UPDATE (Sept 2026) — P0 production blockers resolved:**
+> (1) Team invitations are now deliverable end-to-end: the inviter receives a
+> shareable `/invite/[token]` link at creation time, real invite emails are sent
+> via Resend when `RESEND_API_KEY` is configured, and the UI reports the true
+> delivery status (`sent` / `not_configured` / `delivery_failed`) — it never
+> claims an email was sent when it was not.
+> (2) Report export now returns a real server-side PDF
+> (`/api/reports/export`, `application/pdf`) generated from the audit row,
+> with the export quota still enforced in a single Serializable transaction.
+> (3) Rate limiting fails closed: the Upstash `{result: N}` response envelope is
+> parsed correctly (the earlier bare-number parse silently disabled limits), the
+> limiter fails closed in production on transport/backend errors, and production
+> builds/apps validate that `UPSTASH_REDIS_REST_URL` and
+> `UPSTASH_REDIS_REST_TOKEN` are both set (the in-process memory backend is
+> dev/test only).
+
 ---
 
 ## Executive Summary
@@ -296,16 +312,14 @@ const stripe = new Stripe(env.STRIPE_SECRET_KEY!, { apiVersion: "2026-04-22.dahl
 No CORS headers found in any route. Next.js default allows same-origin only, but should be explicit for production.
 
 **Session Token Security**
-[lib/auth.ts](lib/auth.ts#L7):
-```typescript
-session: { strategy: "database" },  // ✓ Database sessions (more secure than JWT)
-allowDangerousEmailAccountLinking: true,  // ⚠️ Warning: enables account linking risks
-```
-The `allowDangerousEmailAccountLinking` should be reviewed - could allow attacker to link accounts if email verification fails.
+
+> **Correction (2026-09-05):** Authentication is now email + password
+> (bcrypt hashes + signed HTTP-only session cookies via `lib/auth/*` and
+> `proxy.ts`); the NextAuth-based code referenced below no longer exists.
 
 ### ✅ WHAT'S WORKING
 - Auth guards on all protected routes
-- NextAuth properly configured with database sessions
+- bcrypt password hashing with signed HTTP-only session cookies
 - Stripe webhook signature validation
 - Request validation with Zod schemas
 - Environment variable validation at startup

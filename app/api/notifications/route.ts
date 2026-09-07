@@ -6,24 +6,38 @@ import {
   saveNotificationPreference,
   getNotificationPreferences,
 } from "@/lib/services/notification-service";
+import { requireUserId } from "@/lib/auth/dal";
+import { parseBody, withErrorHandling } from "@/lib/errors";
+import { notificationPreferenceSchema } from "@/lib/validation/schemas";
 
-export async function GET() {
+export const GET = withErrorHandling(async (request: Request) => {
+  const userId = await requireUserId();
+
+  const url = new URL(request.url);
+  const rawTake = url.searchParams.get("take");
+  const take = rawTake ? Math.min(Math.max(parseInt(rawTake, 10) || 50, 1), 100) : 50;
+  const cursor = url.searchParams.get("cursor") || undefined;
+
   const [notifications, unreadCount, preferences] = await Promise.all([
-    getNotifications(""),
-    getUnreadNotificationCount(""),
-    getNotificationPreferences(""),
+    getNotifications(userId, take, cursor),
+    getUnreadNotificationCount(userId),
+    getNotificationPreferences(userId),
   ]);
 
   return NextResponse.json({ notifications, unreadCount, preferences });
-}
+});
 
-export async function PUT(request: Request) {
-  const { type, enabled } = await request.json();
-  const pref = await saveNotificationPreference("", type, enabled);
+export const PUT = withErrorHandling(async (request: Request) => {
+  const userId = await requireUserId();
+  const { type, enabled } = await parseBody(request, notificationPreferenceSchema);
+  const pref = await saveNotificationPreference(userId, type, enabled);
   return NextResponse.json(pref);
-}
+});
 
-export async function PATCH() {
-  await markAllNotificationsRead("");
+export const PATCH = withErrorHandling(async () => {
+  const userId = await requireUserId();
+  await markAllNotificationsRead(userId);
   return NextResponse.json({ success: true });
-}
+});
+
+export const runtime = "nodejs";

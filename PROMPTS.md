@@ -1,6 +1,6 @@
 # AI Prompts
 
-This project uses OpenAI prompts inside `lib/services/ai-service.ts` to produce optimization insights, executive summaries, vendor consolidation suggestions, and ROI analysis.
+This project uses OpenAI prompts inside `lib/services/ai-service.ts` to produce optimization insights, executive summaries, vendor consolidation suggestions, and savings analysis.
 
 ## Optimization Insights Prompt
 System prompt:
@@ -32,10 +32,10 @@ User prompt:
 JSON serialized list of tools with name, spend, and status.
 ```
 
-## ROI Analysis Prompt
+## Savings Analysis Prompt
 System prompt:
 ```
-You are a financial analyst. Write a detailed ROI analysis paragraph based on the audit data.
+You are a financial analyst. Write a detailed savings analysis paragraph based on the audit data, describing the monthly savings rate (monthly savings divided by current monthly spend).
 ```
 User prompt:
 ```
@@ -43,4 +43,4 @@ JSON serialized audit data containing spend and savings metrics.
 ```
 
 ## Fallback behavior
-If the OpenAI API key is not configured, the app returns fallback insights, summary, and ROI text based on deterministic rules.
+If the OpenAI API key is not configured, the app returns fallback insights, summary, and savings text based on deterministic rules.

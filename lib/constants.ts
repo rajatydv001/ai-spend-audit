@@ -1,6 +1,5 @@
 export const APP_NAME = "AI Spend Audit";
 export const APP_DESCRIPTION = "Analyze your AI stack, identify wasted spend, and discover smarter alternatives instantly.";
-export const APP_URL = "http://localhost:3000";
 
 export const CURRENCY_OPTIONS = [
   { value: "USD", label: "$ USD" },

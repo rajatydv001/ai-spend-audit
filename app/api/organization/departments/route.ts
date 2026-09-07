@@ -1,21 +1,31 @@
 import { NextResponse } from "next/server";
 import { createDepartment, getDepartments } from "@/lib/services/organization-service";
+import { requireUserId } from "@/lib/auth/dal";
+import { requireOrgMembership, requireOrgPermission } from "@/lib/auth/authorization";
+import { parseBody, withErrorHandling, badRequest } from "@/lib/errors";
+import { createDepartmentSchema } from "@/lib/validation/schemas";
 
-export async function GET(request: Request) {
+export const GET = withErrorHandling(async (request: Request) => {
+  const userId = await requireUserId();
+
   const { searchParams } = new URL(request.url);
   const orgId = searchParams.get("orgId");
   if (!orgId) {
-    return NextResponse.json({ error: "orgId required" }, { status: 400 });
+    throw badRequest("orgId is required");
   }
+
+  await requireOrgMembership(userId, orgId);
   const departments = await getDepartments(orgId);
   return NextResponse.json(departments);
-}
+});
 
-export async function POST(request: Request) {
-  const { orgId, name } = await request.json();
-  if (!orgId || !name) {
-    return NextResponse.json({ error: "orgId and name required" }, { status: 400 });
-  }
-  const dept = await createDepartment(orgId, name);
+export const POST = withErrorHandling(async (request: Request) => {
+  const userId = await requireUserId();
+  const { orgId, name } = await parseBody(request, createDepartmentSchema);
+
+  await requireOrgPermission(userId, orgId, "department:create");
+  const dept = await createDepartment(orgId, name, userId);
   return NextResponse.json(dept, { status: 201 });
-}
+});
+
+export const runtime = "nodejs";

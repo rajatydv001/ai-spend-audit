@@ -1,49 +1,82 @@
-interface PricingData {
+import { VENDOR_PRICING, getActiveToolPlans } from "@/lib/pricing/catalog";
+
+/**
+ * Pricing intelligence utilities.
+ *
+ * All pricing is read synchronously from the versioned, time-aware catalog
+ * (the same source of truth the audit engine uses) instead of a second,
+ * divergent hardcoded table — so the two can never drift. Prices resolve for a
+ * given `date` (defaults to now) and are never invented: unknown plans yield
+ * no match rather than a made-up number. Custom/usage pricing stays as-is and
+ * is never converted into an estimated fixed number.
+ */
+
+interface PricingSurface {
   tool: string;
   plan: string;
   costPerUser: number;
   minUsers: number;
   category: "SaaS" | "API";
+  /** Negotiated/custom contracts carry no public list price — never converted. */
+  custom: boolean;
+  /** Usage-metered plans have no fixed per-user cost — not comparable. */
+  usageBased: boolean;
 }
 
-const PRICING_DB: PricingData[] = [
-  { tool: "ChatGPT", plan: "Free", costPerUser: 0, minUsers: 1, category: "SaaS" },
-  { tool: "ChatGPT", plan: "Plus", costPerUser: 20, minUsers: 1, category: "SaaS" },
-  { tool: "ChatGPT", plan: "Team", costPerUser: 30, minUsers: 2, category: "SaaS" },
-  { tool: "ChatGPT", plan: "Enterprise", costPerUser: 50, minUsers: 10, category: "SaaS" },
-  { tool: "Claude", plan: "Free", costPerUser: 0, minUsers: 1, category: "SaaS" },
-  { tool: "Claude", plan: "Pro", costPerUser: 20, minUsers: 1, category: "SaaS" },
-  { tool: "Claude", plan: "Max", costPerUser: 100, minUsers: 1, category: "SaaS" },
-  { tool: "Claude", plan: "Team", costPerUser: 30, minUsers: 2, category: "SaaS" },
-  { tool: "Claude", plan: "Enterprise", costPerUser: 60, minUsers: 10, category: "SaaS" },
-  { tool: "Cursor", plan: "Hobby", costPerUser: 0, minUsers: 1, category: "SaaS" },
-  { tool: "Cursor", plan: "Pro", costPerUser: 20, minUsers: 1, category: "SaaS" },
-  { tool: "Cursor", plan: "Business", costPerUser: 40, minUsers: 2, category: "SaaS" },
-  { tool: "Cursor", plan: "Enterprise", costPerUser: 80, minUsers: 10, category: "SaaS" },
-  { tool: "Copilot", plan: "Individual", costPerUser: 10, minUsers: 1, category: "SaaS" },
-  { tool: "Copilot", plan: "Business", costPerUser: 30, minUsers: 1, category: "SaaS" },
-  { tool: "Copilot", plan: "Enterprise", costPerUser: 50, minUsers: 10, category: "SaaS" },
-  { tool: "Gemini", plan: "Pro", costPerUser: 0, minUsers: 1, category: "SaaS" },
-  { tool: "Gemini", plan: "Ultra", costPerUser: 30, minUsers: 1, category: "SaaS" },
-  { tool: "Windsurf", plan: "Hobby", costPerUser: 0, minUsers: 1, category: "SaaS" },
-  { tool: "Windsurf", plan: "Pro", costPerUser: 15, minUsers: 1, category: "SaaS" },
-  { tool: "Windsurf", plan: "Business", costPerUser: 35, minUsers: 2, category: "SaaS" },
-  { tool: "Windsurf", plan: "Enterprise", costPerUser: 75, minUsers: 10, category: "SaaS" },
-];
+const CATEGORY: Record<string, "SaaS" | "API"> = {
+  ChatGPT: "SaaS",
+  Claude: "SaaS",
+  Cursor: "SaaS",
+  Copilot: "SaaS",
+  Gemini: "SaaS",
+  Windsurf: "SaaS",
+  "OpenAI API": "API",
+  "Anthropic API": "API",
+  "ChatGPT API": "API",
+  "Claude API": "API",
+};
 
-export function getToolAlternatives(toolName: string, currentPlan: string, users: number) {
-  const similarTools = PRICING_DB
+function activeSurface(date: Date = new Date()): PricingSurface[] {
+  const products = new Set(VENDOR_PRICING.map((v) => v.product));
+  const surface: PricingSurface[] = [];
+  for (const product of products) {
+    const plans = getActiveToolPlans(product, date);
+    for (const p of plans) {
+      surface.push({
+        tool: product,
+        plan: p.name,
+        costPerUser: p.costPerUser,
+        minUsers: p.minUsers ?? 1,
+        category: CATEGORY[product] ?? "SaaS",
+        custom: p.custom,
+        usageBased: p.usageBased,
+      });
+    }
+  }
+  return surface;
+}
+
+export function getToolAlternatives(
+  toolName: string,
+  currentPlan: string,
+  users: number,
+  date: Date = new Date()
+) {
+  const db = activeSurface(date);
+  const similarTools = db
     .filter((p) => p.tool !== toolName)
-    .reduce<Record<string, { plan: string; monthlyCost: number; annualCost: number }[]>>((acc, p) => {
+    .reduce<Record<string, { plan: string; monthlyCost: number | null; annualCost: number | null }[]>>((acc, p) => {
       if (!acc[p.tool]) acc[p.tool] = [];
+      // Custom and usage-metered plans have no fixed public price, so a number
+      // would be invented — they surface as null (not comparable) instead.
+      const monthly = p.custom || p.usageBased ? null : p.costPerUser * Math.max(users, p.minUsers);
       acc[p.tool].push({
         plan: p.plan,
-        monthlyCost: p.costPerUser * Math.max(users, p.minUsers),
-        annualCost: p.costPerUser * Math.max(users, p.minUsers) * 12,
+        monthlyCost: monthly,
+        annualCost: monthly === null ? null : monthly * 12,
       });
       return acc;
     }, {});
-
   return similarTools;
 }
 
@@ -92,25 +125,49 @@ export function detectRedundantSubscriptions(
 export function compareToolPricing(
   currentTool: string,
   currentPlan: string,
-  users: number
+  users: number,
+  date: Date = new Date()
 ) {
-  const current = PRICING_DB.find(
+  const db = activeSurface(date);
+  const current = db.find(
     (p) => p.tool === currentTool && p.plan === currentPlan
   );
 
-  const alternatives = PRICING_DB
+  // A comparison is only meaningful when BOTH sides have a fixed, priced list
+  // plan. When the current plan is unknown OR custom/usage-based, savings is
+  // null — never a fabricated 0 ("free" is a claim, not a number).
+  const currentComparable =
+    current != null && !current.custom && !current.usageBased;
+  const currentPrice =
+    currentComparable && current
+      ? current.costPerUser * Math.max(users, current.minUsers)
+      : null;
+
+  const alternatives = db
     .filter((p) => p.tool !== currentTool)
-    .map((p) => ({
-      tool: p.tool,
-      plan: p.plan,
-      monthlyCost: p.costPerUser * Math.max(users, p.minUsers),
-      annualCost: p.costPerUser * Math.max(users, p.minUsers) * 12,
-      savings: current
-        ? Math.round((current.costPerUser * Math.max(users, current.minUsers) - p.costPerUser * Math.max(users, p.minUsers)) * 100) / 100
-        : 0,
-      category: p.category,
-    }))
-    .sort((a, b) => b.savings - a.savings);
+    .map((p) => {
+      const altComparable = !p.custom && !p.usageBased;
+      const altPrice = altComparable
+        ? p.costPerUser * Math.max(users, p.minUsers)
+        : null;
+      return {
+        tool: p.tool,
+        plan: p.plan,
+        monthlyCost: altPrice,
+        annualCost: altPrice === null ? null : Math.round(altPrice * 12 * 100) / 100,
+        savings:
+          currentPrice !== null && altPrice !== null
+            ? Math.round((currentPrice - altPrice) * 100) / 100
+            : null,
+        category: p.category,
+      };
+    })
+    // Non-comparable rows (custom/usage alternatives) sort last, never above a
+    // real dollar figure.
+    .sort(
+      (a, b) =>
+        (b.savings ?? -Infinity) - (a.savings ?? -Infinity)
+    );
 
   return { current, alternatives };
 }

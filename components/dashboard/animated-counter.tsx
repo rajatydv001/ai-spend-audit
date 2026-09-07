@@ -13,6 +13,18 @@ interface AnimatedCounterProps {
   formatter?: (value: number) => string;
 }
 
+/**
+ * Decides whether the counter still needs to animate toward `to`.
+ *
+ * We only treat a target as already reached once the animation has actually
+ * COMPLETED (onComplete). Marking it as reached when the animation merely
+ * *starts* breaks under React StrictMode, because the effect is mounted,
+ * cleaned up (stopping the animation) and mounted again before the first
+ * pass finishes. In that case the second pass would otherwise skip the
+ * animation and leave the counter stuck at 0.
+ */
+export const shouldAnimate = (shownTarget: number, to: number): boolean => shownTarget !== to;
+
 export default function AnimatedCounter({
   from = 0,
   to,
@@ -23,11 +35,12 @@ export default function AnimatedCounter({
   formatter,
 }: AnimatedCounterProps) {
   const [displayText, setDisplayText] = useState(() => formatter?.(from) ?? String(Math.round(from)));
-  const prevTo = useRef(from);
+  const shownTarget = useRef(from);
 
   useEffect(() => {
-    if (to === prevTo.current) return;
-    prevTo.current = to;
+    if (!shouldAnimate(shownTarget.current, to)) return;
+
+    setDisplayText(formatter?.(from) ?? String(Math.round(from)));
 
     const controls = animate(from, to, {
       duration,
@@ -35,6 +48,10 @@ export default function AnimatedCounter({
       onUpdate: (v) => {
         const rounded = Math.round(v);
         setDisplayText(formatter?.(rounded) ?? String(rounded));
+      },
+      onComplete: () => {
+        shownTarget.current = to;
+        setDisplayText(formatter?.(to) ?? String(Math.round(to)));
       },
     });
 

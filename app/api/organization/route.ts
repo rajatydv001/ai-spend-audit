@@ -1,23 +1,39 @@
 import { NextResponse } from "next/server";
 import { createOrganization, getOrganization } from "@/lib/services/organization-service";
-import { DEFAULT_USER_ID } from "@/lib/defaults";
+import { requireUserId } from "@/lib/auth/dal";
+import { requireOrgMembership } from "@/lib/auth/authorization";
+import { parseBody, withErrorHandling, badRequest, ApiError } from "@/lib/errors";
+import { rateLimitOrThrow } from "@/lib/services/rate-limit";
+import { z } from "zod";
 
-export async function POST(request: Request) {
-  const { name } = await request.json();
-  if (!name) {
-    return NextResponse.json({ error: "Organization name required" }, { status: 400 });
-  }
+const createOrgSchema = z.object({
+  name: z.string().min(1, "Organization name is required").trim(),
+});
 
-  const org = await createOrganization(name, DEFAULT_USER_ID);
+export const POST = withErrorHandling(async (request: Request) => {
+  const userId = await requireUserId();
+  await rateLimitOrThrow(`org:create:${userId}`, 5, 60000);
+  const { name } = await parseBody(request, createOrgSchema);
+
+  const org = await createOrganization(name, userId);
   return NextResponse.json(org, { status: 201 });
-}
+});
 
-export async function GET(request: Request) {
+export const GET = withErrorHandling(async (request: Request) => {
+  const userId = await requireUserId();
+
   const { searchParams } = new URL(request.url);
   const orgId = searchParams.get("orgId");
   if (!orgId) {
-    return NextResponse.json({ error: "orgId required" }, { status: 400 });
+    throw badRequest("orgId is required");
   }
+
+  await requireOrgMembership(userId, orgId);
   const org = await getOrganization(orgId);
+  if (!org) {
+    throw new ApiError("Not found", 404);
+  }
   return NextResponse.json(org);
-}
+});
+
+export const runtime = "nodejs";

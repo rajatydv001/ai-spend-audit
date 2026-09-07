@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { ROUTES } from "@/lib/constants";
+import { logoutAction } from "@/lib/auth/actions";
 
 const mainNav = [
   { href: ROUTES.DASHBOARD, label: "Dashboard", icon: "📊" },
@@ -18,6 +19,7 @@ const analyticsNav = [
 
 const miscNav = [
   { href: "/dashboard/billing", label: "Billing", icon: "💳" },
+  { href: "/dashboard/team", label: "Team", icon: "👥" },
   { href: "/dashboard/notifications", label: "Notifications", icon: "🔔" },
 ];
 
@@ -63,7 +65,10 @@ function NavSection({ items, onClick }: { items: readonly { readonly href: strin
   );
 }
 
-function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
+function SidebarContent({ onNavClick, user }: { onNavClick?: () => void; user?: { name: string | null; email: string; image: string | null; isPlatformAdmin?: boolean } | null }) {
+  const bottomItems = user?.isPlatformAdmin
+    ? bottomNav
+    : bottomNav.filter((item) => item.href !== "/dashboard/admin");
   return (
     <>
       <div className="flex items-center gap-3 border-b border-white/10 px-6 py-5">
@@ -93,12 +98,39 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
         </div>
 
         <div className="pt-2">
-          <NavSection items={bottomNav} onClick={onNavClick} />
+          <NavSection items={bottomItems} onClick={onNavClick} />
         </div>
       </nav>
 
       <div className="border-t border-white/10 px-6 py-4">
-        <p className="text-xs text-gray-500">AI Spend Audit &copy; 2026</p>
+        {user && (
+          <div className="mb-4 flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-sm font-medium text-white">
+              {user.image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={user.image} alt={user.name ?? "User"} className="h-9 w-9 rounded-full object-cover" />
+              ) : (
+                (user.name?.[0] ?? user.email[0] ?? "?").toUpperCase()
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-white">{user.name ?? "User"}</p>
+              <p className="truncate text-xs text-gray-500">{user.email}</p>
+            </div>
+          </div>
+        )}
+
+        <form action={logoutAction}>
+          <button
+            type="submit"
+            className="flex w-full items-center gap-3 rounded-xl px-4 py-2 text-sm font-medium text-gray-500 transition hover:bg-white/5 hover:text-gray-300"
+          >
+            <span className="text-lg">↵</span>
+            Sign Out
+          </button>
+        </form>
+
+        <p className="mt-2 text-xs text-gray-500">AI Spend Audit &copy; 2026</p>
       </div>
     </>
   );
@@ -107,9 +139,11 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
 export default function Sidebar({
   isOpen,
   onClose,
+  user,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  user?: { name: string | null; email: string; image: string | null; isPlatformAdmin?: boolean } | null;
 }) {
   return (
     <>
@@ -131,7 +165,7 @@ export default function Sidebar({
               transition={{ type: "spring", stiffness: 400, damping: 35 }}
               className="fixed inset-y-0 left-0 z-10 flex w-64 flex-col border-r border-white/10 bg-black/40 backdrop-blur-2xl"
             >
-              <SidebarContent onNavClick={onClose} />
+              <SidebarContent onNavClick={onClose} user={user} />
             </motion.aside>
           </motion.div>
         )}
@@ -139,7 +173,7 @@ export default function Sidebar({
 
       {/* Desktop sidebar */}
       <aside className="hidden w-64 flex-shrink-0 border-r border-white/10 bg-black/40 backdrop-blur-2xl md:flex md:flex-col">
-        <SidebarContent />
+        <SidebarContent user={user} />
       </aside>
     </>
   );

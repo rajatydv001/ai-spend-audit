@@ -8,9 +8,12 @@ interface PlanFeature {
   included: boolean;
 }
 
+type PriceMap = { PRO: string | null; ENTERPRISE: string | null };
+
 const PLANS = [
   {
     name: "Free",
+    key: "FREE",
     price: "$0",
     description: "Get started with basic audits",
     features: [
@@ -23,10 +26,10 @@ const PLANS = [
     ],
     cta: "Current Plan",
     popular: false,
-    priceId: null,
   },
   {
     name: "Pro",
+    key: "PRO",
     price: "$29",
     period: "/month",
     description: "For growing teams that need deeper insights",
@@ -40,10 +43,10 @@ const PLANS = [
     ],
     cta: "Upgrade to Pro",
     popular: true,
-    priceId: process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID || "price_pro_monthly",
   },
   {
     name: "Enterprise",
+    key: "ENTERPRISE",
     price: "$99",
     period: "/month",
     description: "For organizations requiring full control",
@@ -56,8 +59,8 @@ const PLANS = [
       { text: "Dedicated support", included: true },
     ],
     cta: "Contact Sales",
+    contact: "mailto:sales@aispendingaudit.com?subject=Enterprise%20plan%20inquiry",
     popular: false,
-    priceId: process.env.NEXT_PUBLIC_STRIPE_ENTERPRISE_PRICE_ID || "price_enterprise_monthly",
   },
 ];
 
@@ -65,10 +68,12 @@ export default function BillingPlans({
   currentPlan,
   onUpgrade,
   loading,
+  prices,
 }: {
   currentPlan?: string;
   onUpgrade?: (priceId: string, plan: string) => void;
   loading?: boolean;
+  prices?: PriceMap;
 }) {
   return (
     <motion.div
@@ -79,6 +84,9 @@ export default function BillingPlans({
     >
       {PLANS.map((plan) => {
         const isCurrent = currentPlan?.toLowerCase() === plan.name.toLowerCase();
+        const paidKey = plan.key as keyof PriceMap;
+        const priceId = plan.key === "FREE" ? null : prices?.[paidKey] ?? null;
+        const disabled = isCurrent || loading || !priceId;
         return (
           <motion.div
             key={plan.name}
@@ -122,23 +130,32 @@ export default function BillingPlans({
               ))}
             </ul>
 
-            <button
-              onClick={() => {
-                if (plan.priceId && onUpgrade) {
-                  onUpgrade(plan.priceId, plan.name.toUpperCase());
-                }
-              }}
-              disabled={isCurrent || loading || !plan.priceId}
-              className={`mt-8 w-full rounded-2xl py-3 text-sm font-medium transition ${
-                isCurrent
-                  ? "border border-white/10 bg-white/5 text-gray-400 cursor-default"
-                  : plan.popular
-                  ? "bg-blue-500 text-white hover:bg-blue-600"
-                  : "border border-white/10 bg-white/5 text-white hover:bg-white/10"
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              {loading ? "Processing..." : isCurrent ? "Current Plan" : plan.cta}
-            </button>
+            {plan.contact ? (
+              <a
+                href={plan.contact}
+                className={`mt-8 block w-full rounded-2xl py-3 text-center text-sm font-medium transition border border-white/10 bg-white/5 text-white hover:bg-white/10`}
+              >
+                {plan.cta}
+              </a>
+            ) : (
+              <button
+                onClick={() => {
+                  if (priceId && onUpgrade) {
+                    onUpgrade(priceId, plan.key);
+                  }
+                }}
+                disabled={disabled}
+                className={`mt-8 w-full rounded-2xl py-3 text-sm font-medium transition ${
+                  isCurrent
+                    ? "border border-white/10 bg-white/5 text-gray-400 cursor-default"
+                    : plan.popular
+                    ? "bg-blue-500 text-white hover:bg-blue-600"
+                    : "border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {loading ? "Processing..." : isCurrent ? "Current Plan" : plan.cta}
+              </button>
+            )}
           </motion.div>
         );
       })}

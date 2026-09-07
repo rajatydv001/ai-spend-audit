@@ -6,6 +6,9 @@ AI Spend Audit helps teams identify wasted spending on AI subscriptions and API 
 ## Why did I choose this implementation?
 I chose Next.js with TypeScript and Prisma because they provide a scalable full-stack foundation with strong developer ergonomics. Stripe and NextAuth make SaaS onboarding and payments reliable, while Tailwind and Recharts support polished UI and analytics visualization.
 
+> **Correction (2026-09-05):** authentication is shipped as email + password
+> (bcrypt + signed session cookies), not NextAuth/OAuth.
+
 ## What were the biggest technical challenges?
 The hardest parts were balancing a SaaS-grade architecture with a lightweight audit experience and integrating multiple systems cleanly: authentication, billing, AI, notifications, and analytics. Ensuring the app remained responsive while handling many interconnected routes and services was also challenging.
 

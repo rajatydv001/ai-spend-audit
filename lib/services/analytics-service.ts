@@ -1,11 +1,27 @@
 import { prisma } from "@/lib/db";
+import { internalError } from "@/lib/errors";
+
+/**
+ * Every analytics function below is STRICTLY user-scoped: the caller must have
+ * resolved the authenticated user id (e.g. via `requireUserId`). A missing or
+ * empty user scope fails closed — it must never degrade to an unscoped query
+ * that aggregates other users' audits. (Cross-user aggregates, if ever needed,
+ * belong in an explicitly-authorized admin path, not here.)
+ */
+function assertUserScope(userId: string): string {
+  if (typeof userId !== "string" || userId.trim().length === 0) {
+    throw internalError("Analytics requires an authenticated user scope");
+  }
+  return userId;
+}
 
 export async function getSpendingTrends(
   userId: string,
   months: number = 6
 ) {
+  assertUserScope(userId);
   const audits = await prisma.audit.findMany({
-    where: userId ? { userId } : {},
+    where: { userId },
     orderBy: { createdAt: "asc" },
     take: months,
     select: {
@@ -55,8 +71,9 @@ export async function getDepartmentAnalytics(organizationId: string) {
 }
 
 export async function getToolAdoptionAnalytics(userId: string) {
+  assertUserScope(userId);
   const audits = await prisma.audit.findMany({
-    where: userId ? { userId } : {},
+    where: { userId },
     include: { tools: true },
     orderBy: { createdAt: "desc" },
     take: 50,
@@ -87,8 +104,9 @@ export async function getToolAdoptionAnalytics(userId: string) {
 }
 
 export async function getAIUtilizationScore(userId: string) {
+  assertUserScope(userId);
   const audits = await prisma.audit.findMany({
-    where: userId ? { userId } : {},
+    where: { userId },
     orderBy: { createdAt: "desc" },
     take: 10,
     include: { tools: true },
@@ -124,8 +142,9 @@ export async function getAIUtilizationScore(userId: string) {
 }
 
 export async function getProjectedFutureSpend(userId: string) {
+  assertUserScope(userId);
   const audits = await prisma.audit.findMany({
-    where: userId ? { userId } : {},
+    where: { userId },
     orderBy: { createdAt: "asc" },
     select: { createdAt: true, totalCurrentSpend: true },
   });

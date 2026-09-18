@@ -44,6 +44,38 @@ describe("getSpendingTrends", () => {
   });
 });
 
+describe("analytics fail closed without a user scope (no cross-user query)", () => {
+  const unscoped: Array<() => Promise<unknown>> = [
+    () => getSpendingTrends(""),
+    () => getSpendingTrends("   "),
+    () => getSpendingTrends(undefined as unknown as string),
+    () => getToolAdoptionAnalytics(""),
+    () => getToolAdoptionAnalytics(undefined as unknown as string),
+    () => getAIUtilizationScore(""),
+    () => getAIUtilizationScore(undefined as unknown as string),
+    () => getProjectedFutureSpend(""),
+    () => getProjectedFutureSpend(undefined as unknown as string),
+  ];
+
+  it.each(unscoped)("throws instead of querying all users (%#)", async (call) => {
+    await expect(call()).rejects.toMatchObject({ statusCode: 500 });
+    // The absolute no-op guarantee: never issue an unscoped {} query.
+    expect(findManyAudit).not.toHaveBeenCalled();
+  });
+
+  it("user-scoped queries always carry the authenticated user id, never an empty filter", async () => {
+    findManyAudit.mockResolvedValue([]);
+    await getSpendingTrends("user-1");
+    await getToolAdoptionAnalytics("user-1");
+    await getAIUtilizationScore("user-1");
+    await getProjectedFutureSpend("user-1");
+    for (const call of findManyAudit.mock.calls) {
+      expect(call[0].where).toEqual({ userId: "user-1" });
+      expect(call[0].where).not.toEqual({});
+    }
+  });
+});
+
 describe("getDepartmentAnalytics", () => {
   it("computes per-department spend/savings/score from matching audits", async () => {
     findManyDept.mockResolvedValue([

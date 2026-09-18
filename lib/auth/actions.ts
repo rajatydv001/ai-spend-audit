@@ -2,11 +2,12 @@
 
 import { z } from "zod";
 import bcrypt from "bcryptjs";
+import { createHash } from "node:crypto";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
-import { createSession, deleteSession } from "@/lib/auth/session";
 import { rateLimit, trustProxy } from "@/lib/services/rate-limit";
+import { establishSession, revokeActiveSession } from "@/lib/services/session-service";
 import { createAuditLog } from "@/lib/services/audit-log";
 import { createOrganization } from "@/lib/services/organization-service";
 
@@ -30,6 +31,14 @@ const SignupSchema = AuthSchema.extend({
 // is already registered (account enumeration). The specific reason is recorded
 // only in the internal audit log.
 const GENERIC_SIGNUP_ERROR = "We couldn't create your account. Please try again.";
+
+// Rate-limit dimensions. The IP bucket stops a single source from spraying many
+// accounts; the account (email) bucket stops one account from being hammered —
+// including when the request carries useful forwarded headers but no distinct
+// IP (e.g. "anonymous"). Keys never contain the raw email, only its SHA-256.
+function emailKey(email: string): string {
+  return createHash("sha256").update(email).digest("hex");
+}
 
 async function getRequestIp(): Promise<string> {
   const h = await headers();
@@ -88,8 +97,9 @@ export async function signupAction(
     password: formData.get("password"),
   });
 
-  const rateCheck = await rateLimit(`auth:signup:${await getRequestIp()}`, 5, 15 * 60 * 1000);
-  if (!rateCheck.ok) {
+  const ip = await getRequestIp();
+  const ipCheck = await rateLimit(`auth:signup:ip:${ip}`, 5, 15 * 60 * 1000);
+  if (!ipCheck.ok) {
     return { errors: { _form: ["Too many signup attempts. Please try again later."] } };
   }
 
@@ -154,7 +164,7 @@ export async function signupAction(
     metadata: JSON.stringify({ email, provider: "email" }),
   });
 
-  await createSession(userId);
+  await establishSession(userId);
   redirect(safeRedirectPath(formData.get("next")) ?? "/dashboard");
 }
 
@@ -167,8 +177,22 @@ export async function loginAction(
     password: formData.get("password"),
   });
 
-  const rateCheck = await rateLimit(`auth:login:${await getRequestIp()}`, 10, 60 * 1000);
-  if (!rateCheck.ok) {
+  const ip = await getRequestIp();
+  // Two dimensions, both enforced: a single IP cannot spray many accounts
+  // (20/min), and a single account cannot be brute-forced (10 per 15 min) —
+  // even by many IPs, and even when no distinct IP is resolvable. Neither
+  // bucket is global, so one user's traffic cannot block unrelated users.
+  const ipCheck = await rateLimit(`auth:login:ip:${ip}`, 20, 60 * 1000);
+  if (!ipCheck.ok) {
+    return { errors: { _form: ["Too many login attempts. Please try again later."] } };
+  }
+  const rawEmail = String(formData.get("email") ?? "").trim().toLowerCase();
+  const emailCheck = await rateLimit(
+    `auth:login:email:${emailKey(rawEmail)}`,
+    10,
+    15 * 60 * 1000
+  );
+  if (!emailCheck.ok) {
     return { errors: { _form: ["Too many login attempts. Please try again later."] } };
   }
 
@@ -208,11 +232,13 @@ export async function loginAction(
     entityId: user.id,
   });
 
-  await createSession(user.id);
+  await establishSession(user.id);
   redirect(safeRedirectPath(formData.get("next")) ?? "/dashboard");
 }
 
 export async function logoutAction(): Promise<void> {
-  await deleteSession();
+  // Invalidate the server-side session record first, then clear the cookie, so
+  // a replayed old cookie is rejected by requireUserId/getSessionUser.
+  await revokeActiveSession();
   redirect("/login");
 }

@@ -58,6 +58,7 @@ model User {
   sentInvites      Invite[]          @relation("SentInvites")
   receivedInvites  Invite[]          @relation("ReceivedInvites")
   auditLogs        AuditLog[]
+  sessions         Session[]
 }
 
 model Organization {
@@ -190,6 +191,19 @@ model AuditLog {
 
   @@index([departmentId])
   @@index([createdAt])
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Audit {

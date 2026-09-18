@@ -18,9 +18,13 @@ const mocks = vi.hoisted(() => ({
   userUpdate: vi.fn(),
   organizationCreate: vi.fn(),
   auditLogCreate: vi.fn(),
+  sessionCreate: vi.fn(),
+  sessionFindUnique: vi.fn(),
+  sessionUpdateMany: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/session", () => ({
+  SESSION_DURATION_MS: 7 * 24 * 60 * 60 * 1000,
   createSession: mocks.createSession,
   deleteSession: mocks.deleteSession,
   getSession: mocks.getSession,
@@ -35,6 +39,11 @@ vi.mock("@/lib/db", () => ({
     },
     organization: { create: mocks.organizationCreate },
     auditLog: { create: mocks.auditLogCreate },
+    session: {
+      create: mocks.sessionCreate,
+      findUnique: mocks.sessionFindUnique,
+      updateMany: mocks.sessionUpdateMany,
+    },
   },
 }));
 
@@ -85,7 +94,18 @@ describe("signup", () => {
 
     expect(res).toBeUndefined(); // redirect() called
     expect(redirect).toHaveBeenCalledWith("/dashboard");
-    expect(mocks.createSession).toHaveBeenCalledWith("u1");
+    expect(mocks.createSession).toHaveBeenCalledWith("u1", expect.any(String));
+    // A server-side session record is persisted alongside the signed cookie so
+    // the session can be validated and revoked. Only a one-way hash is stored.
+    expect(mocks.sessionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: "u1",
+          tokenHash: expect.any(String),
+          expiresAt: expect.any(Date),
+        }),
+      })
+    );
 
     const data = mocks.userCreate.mock.calls[0][0].data;
     expect(data.email).toBe("jane@example.com");
@@ -182,7 +202,8 @@ describe("login", () => {
     const res = await loginAction(undefined, loginForm());
 
     expect(res).toBeUndefined();
-    expect(mocks.createSession).toHaveBeenCalledWith("u1");
+    expect(mocks.createSession).toHaveBeenCalledWith("u1", expect.any(String));
+    expect(mocks.sessionCreate).toHaveBeenCalled();
     expect(redirect).toHaveBeenCalledWith("/dashboard");
     expect(mocks.auditLogCreate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ action: "user.login" }) })
@@ -214,7 +235,7 @@ describe("login", () => {
 
     await loginAction(undefined, loginForm({ next: "/invite/tok-abc" }));
 
-    expect(mocks.createSession).toHaveBeenCalledWith("u1");
+    expect(mocks.createSession).toHaveBeenCalledWith("u1", expect.any(String));
     expect(redirect).toHaveBeenCalledWith("/invite/tok-abc");
   });
 
@@ -279,10 +300,15 @@ describe("session / user identity resolution", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getSession.mockReset();
+    mocks.sessionFindUnique.mockReset();
   });
 
-  it("requireUserId resolves the authenticated user id from the session", async () => {
-    mocks.getSession.mockResolvedValue({ userId: "user-1", expiresAt: new Date() });
+  it("requireUserId resolves the authenticated user id from a live, unrevoked session", async () => {
+    mocks.sessionFindUnique.mockResolvedValue({
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    mocks.getSession.mockResolvedValue({ userId: "user-1", sid: "sid-1", expiresAt: new Date() });
     await expect(requireUserId()).resolves.toBe("user-1");
   });
 
@@ -291,9 +317,43 @@ describe("session / user identity resolution", () => {
     await expect(requireUserId()).rejects.toMatchObject({ statusCode: 401 });
   });
 
+  it("requireUserId rejects a revoked session even though the JWT is still valid", async () => {
+    mocks.sessionFindUnique.mockResolvedValue({
+      revokedAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    mocks.getSession.mockResolvedValue({ userId: "user-1", sid: "sid-revoked", expiresAt: new Date() });
+    await expect(requireUserId()).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it("requireUserId rejects a session whose server-side record has expired", async () => {
+    mocks.sessionFindUnique.mockResolvedValue({
+      revokedAt: null,
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    mocks.getSession.mockResolvedValue({ userId: "user-1", sid: "sid-expired", expiresAt: new Date() });
+    await expect(requireUserId()).rejects.toMatchObject({ statusCode: 401 });
+  });
+
   it("getSessionUser returns null without a session", async () => {
     mocks.getSession.mockResolvedValue(null);
     await expect(getSessionUser()).resolves.toBeNull();
+  });
+
+  it("getSessionUser returns null when the session has been revoked", async () => {
+    mocks.sessionFindUnique.mockResolvedValue({ revokedAt: new Date(), expiresAt: new Date() });
+    mocks.getSession.mockResolvedValue({ userId: "user-1", sid: "sid-gone", expiresAt: new Date() });
+    await expect(getSessionUser()).resolves.toBeNull();
+  });
+
+  it("getSessionUser resolves when the session is live", async () => {
+    mocks.sessionFindUnique.mockResolvedValue({
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    mocks.userFindUnique.mockResolvedValue({ id: "user-1", email: "jane@example.com" });
+    mocks.getSession.mockResolvedValue({ userId: "user-1", sid: "sid-live", expiresAt: new Date() });
+    await expect(getSessionUser()).resolves.toMatchObject({ email: "jane@example.com" });
   });
 
   it("rejects with a centralized ApiError so routes map it consistently", async () => {

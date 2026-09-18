@@ -26,6 +26,7 @@ describe("env validation — rate limiting config", () => {
           ...base,
           NODE_ENV: "production",
           NEXT_PUBLIC_APP_URL: "https://app.example.com",
+          TRUST_PROXY: "1",
           ...partial,
         });
       } catch (error) {
@@ -44,8 +45,26 @@ describe("env validation — rate limiting config", () => {
         NEXT_PUBLIC_APP_URL: "https://app.example.com",
         UPSTASH_REDIS_REST_URL: "https://valid-db.upstash.io",
         UPSTASH_REDIS_REST_TOKEN: "token",
+        TRUST_PROXY: "1",
       })
     ).toBeDefined();
+  });
+
+  it("production fails closed WITHOUT TRUST_PROXY (auth rate limiting must be per-IP, never one global bucket)", () => {
+    let thrown: ZodError | null = null;
+    try {
+      parseEnv({
+        ...base,
+        NODE_ENV: "production",
+        NEXT_PUBLIC_APP_URL: "https://app.example.com",
+        UPSTASH_REDIS_REST_URL: "https://valid-db.upstash.io",
+        UPSTASH_REDIS_REST_TOKEN: "token",
+      });
+    } catch (error) {
+      thrown = error as ZodError;
+    }
+    expect(thrown).toBeInstanceOf(ZodError);
+    expect(thrown?.issues.map((i) => i.path.join("."))).toContain("TRUST_PROXY");
   });
 
   it("a partial Upstash config fails closed in DEV too (never silently ignored)", () => {

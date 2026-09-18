@@ -27,15 +27,24 @@ export const envSchema = z
       });
     }
     if (data.NODE_ENV === "production") {
-      const hasUpstashUrl = Boolean(data.UPSTASH_REDIS_REST_URL);
-      const hasUpstashToken = Boolean(data.UPSTASH_REDIS_REST_TOKEN);
-      if (!hasUpstashUrl || !hasUpstashToken) {
+      const hasUrl = Boolean(data.UPSTASH_REDIS_REST_URL);
+      const hasToken = Boolean(data.UPSTASH_REDIS_REST_TOKEN);
+      if (!hasUrl || !hasToken) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["UPSTASH_REDIS_REST_URL"],
           message:
             "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must both be set in production. " +
             "Rate limiting fails closed without a distributed limiter; the in-process memory backend is dev/test only.",
+        });
+      }
+      if (data.TRUST_PROXY !== "1" && data.TRUST_PROXY !== "true") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["TRUST_PROXY"],
+          message:
+            "TRUST_PROXY must be '1' in production. Auth rate limiting keys on the first x-forwarded-for " +
+            "entry; without trusting the proxy every request collapses into one shared 'anonymous' bucket.",
         });
       }
     }

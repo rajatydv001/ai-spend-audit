@@ -8,8 +8,10 @@ vi.mock("next/headers", () => ({
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("@/lib/db", () => ({ prisma: {} }));
 vi.mock("@/lib/auth/session", () => ({
+  SESSION_DURATION_MS: 7 * 24 * 60 * 60 * 1000,
   createSession: vi.fn(),
   deleteSession: vi.fn(),
+  getSession: vi.fn(),
 }));
 
 import { signupAction, loginAction } from "@/lib/auth/actions";

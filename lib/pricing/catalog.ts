@@ -213,6 +213,7 @@ export interface ActiveToolPlan {
   name: string;
   costPerUser: number;
   minUsers?: number;
+  maxUsers?: number;
   /** Customer segment this tier addresses — used for downgrade eligibility. */
   segment: Segment;
   /** True for heavy "power" tiers that should never auto-downgrade to free. */
@@ -222,6 +223,14 @@ export interface ActiveToolPlan {
   custom: boolean;
   /** True for USAGE-based plans — charged as-you-go, not a fixed seat price. */
   usageBased: boolean;
+  /** True when the list price is VERIFIED against an official source. Savings
+   *  claims are grounded ONLY in VERIFIED figures — unverified prices are shown
+   *  for detection/display but never produce a dollar claim. */
+  verified: boolean;
+  /** True for per-seat subscription tiers (billed per user for an org). A
+   *  consumer/individual license is never seat-based — multiplying it by an
+   *  arbitrary seat count would fabricate cost. */
+  seatBased: boolean;
   /** Billing cadence — the engine resolves plans for the requested cadence. */
   billingCadence: string;
 }
@@ -252,10 +261,17 @@ export function getActiveToolPlans(
       name: v.plan,
       costPerUser: v.price,
       minUsers: v.minSeats ?? undefined,
+      maxUsers: v.maxSeats ?? undefined,
       segment: v.segment,
       power: v.power ?? false,
       custom: v.billingType === "CUSTOM",
       usageBased: v.billingType === "USAGE",
+      verified: v.sourceStatus === "VERIFIED",
+      seatBased:
+        v.billingType === "PER_USER" &&
+        (v.segment === "team" ||
+          v.segment === "business" ||
+          v.segment === "enterprise"),
       billingCadence: v.billingCadence,
     }));
 }

@@ -9,22 +9,25 @@ import {
 // Core behavior — segment-aware downgrade eligibility
 // ────────────────────────────────────────────────────────────────────────────
 describe("Audit Engine", () => {
-  it("detects a non-optimized plan with savings opportunity", () => {
-    // ChatGPT: spend $20/user → detected as Plus → eligible lower-cost is Free.
-    const result = generateAudit("ChatGPT", 20, 1);
+  it("detects a non-optimized plan with a verified savings opportunity", () => {
+    // Claude $200/1 → detected Max 20x (verified $200) → eligible Pro ($20).
+    const result = generateAudit("Claude", 200, 1);
 
-    expect(result.tool).toBe("ChatGPT");
+    expect(result.tool).toBe("Claude");
+    expect(result.currentPlan).toBe("Max 20x");
+    expect(result.recommendedPlan).toBe("Pro");
     expect(result.savings).toBeGreaterThan(0);
     expect(result.optimizationScore).toBeLessThan(100);
     expect(result.status).not.toBe("Optimized");
   });
 
   it("recommends a downgrade for an overpaying tool", () => {
-    const result = generateAudit("ChatGPT", 100, 1);
-    expect(result.tool).toBe("ChatGPT");
+    const result = generateAudit("Claude", 200, 1);
+    expect(result.tool).toBe("Claude");
     expect(result.savings).toBeGreaterThan(0);
     expect(result.status).not.toBe("Optimized");
     expect(result.recommendation).toMatch(/Switch to the \w+ plan/);
+    expect(result.recommendation).toContain("Pro");
   });
 
   it("aggregates multiple tool results correctly", () => {
@@ -81,16 +84,18 @@ describe("Audit Engine - edge cases", () => {
       { tool: "Gemini", spend: 100, users: 1 },
     ]);
     expect(agg.priorityRecommendations.length).toBeLessThanOrEqual(3);
-    // Copilot at $500/1 is detected on Max (individual) → eligible Pro $10 → big savings.
-    expect(agg.priorityRecommendations[0]).toContain("Copilot");
+    // Claude at $200/1 (Max 20x → Pro, savings $180) outranks Copilot at $500/1
+    // (Max → Pro, savings $90); ChatGPT/Gemini have no verified savings.
+    expect(agg.priorityRecommendations[0]).toContain("Claude");
+    expect(agg.priorityRecommendations[1]).toContain("Copilot");
   });
 
   it("produces structured enhanced recommendations with priority/severity/impact", () => {
-    const agg = generateAggregateAudit([{ tool: "ChatGPT", spend: 300, users: 1 }]);
+    const agg = generateAggregateAudit([{ tool: "Claude", spend: 200, users: 1 }]);
     const recs = agg.enhancedRecommendations;
     expect(recs.length).toBeGreaterThan(0);
     expect(recs[0]).toMatchObject({
-      tool: "ChatGPT",
+      tool: "Claude",
       action: expect.any(String),
     });
     expect(["high", "medium", "low"]).toContain(recs[0].priority);
@@ -133,13 +138,14 @@ describe("segment-aware downgrade eligibility", () => {
     expect(result.savings).not.toBe(200);
   });
 
-  it("Claude Max $123/1 → recommends Pro $20; savings $103, not 100%", () => {
+  it("Claude Max $123/1 → recommends Pro $20; savings $80, not 100%", () => {
     // A single Claude Max seat at $123/mo: detected on Max (power) → eligible
-    // downgrade is Pro at $20 → savings = 123 - (20 × 1) = 103.
+    // downgrade is Pro at $20. Verified list spread is 100 − 20 = 80; the
+    // reported spend ($123) caps nothing here, so savings = $80.
     const result = generateAudit("Claude", 123, 1);
     expect(result.currentPlan).toBe("Max");
     expect(result.recommendedPlan).toBe("Pro");
-    expect(result.savings).toBe(103); // 123 - (20 × 1)
+    expect(result.savings).toBe(80); // verified current 100 − verified Pro 20
     expect(result.savings).not.toBe(123);
   });
 
@@ -162,12 +168,16 @@ describe("segment-aware downgrade eligibility", () => {
     expect(result.savings).toBe(0);
   });
 
-  it("allows an individual non-power tier to downgrade to a cheaper individual/free tier", () => {
-    // ChatGPT $15/user → detected Plus (individual, non-power) → Free is eligible.
+  it("never auto-recommends a free tier just because it is the cheapest ($0)", () => {
+    // ChatGPT $15/user → detected Plus (individual, non-power). Free ($0) used to
+    // qualify automatically; now a free tier is never a verified replacement, and
+    // Plus is UNVERIFIED anyway → no savings, no downgrade claim.
     const result = generateAudit("ChatGPT", 15, 1);
     expect(result.currentPlan).toBe("Plus");
-    expect(result.recommendedPlan).toBe("Free");
-    expect(result.savings).toBe(15);
+    expect(result.recommendedPlan).toBe("");
+    expect(result.savings).toBe(0);
+    expect(result.optimizedSpend).toBe(15);
+    expect(result.recommendation).toContain("No verified lower-cost");
   });
 
   it("reports 'No verified lower-cost replacement' with $0 savings when none is eligible", () => {
@@ -182,9 +192,9 @@ describe("segment-aware downgrade eligibility", () => {
 // ────────────────────────────────────────────────────────────────────────────
 describe("savingsRate (Savings Rate, replaces ROI)", () => {
   it("computes savings rate as monthlySavings / monthlySpend, not 12x", () => {
-    // ChatGPT $1000/1 → detected Plus → eligible Free → savings $1000 → rate 100%.
-    const agg = generateAggregateAudit([{ tool: "ChatGPT", spend: 1000, users: 1 }]);
-    expect(agg.savingsRate).toBe(100);
+    // Claude $200/1 → Max 20x → Pro → verified savings $180 → rate = 180/200 = 90%.
+    const agg = generateAggregateAudit([{ tool: "Claude", spend: 200, users: 1 }]);
+    expect(agg.savingsRate).toBe(90);
   });
 
   it("returns 0% savings rate when there are no savings", () => {
@@ -200,7 +210,7 @@ describe("savingsRate (Savings Rate, replaces ROI)", () => {
   it("does not expose the old roiEstimate field", () => {
     const agg = generateAggregateAudit([{ tool: "ChatGPT", spend: 100, users: 1 }]);
     expect("roiEstimate" in agg).toBe(false);
-    expect(agg.savingsRate).toBe(100);
+    expect(agg.savingsRate).toBe(0); // no verified savings → no rate
   });
 });
 
@@ -208,17 +218,15 @@ describe("savingsRate (Savings Rate, replaces ROI)", () => {
 // Team Efficiency Score — regression for counting "Optimization Available"
 // ────────────────────────────────────────────────────────────────────────────
 describe("teamEfficiencyScore", () => {
-  it("counts only fully Optimized tools, not Optimization Available", () => {
-    // OpenAI API (below threshold): savings = $0 → Optimized
-    // ChatGPT $100/1: detected Plus → Free → savings=$100 → Overpaying
-    // Cursor $100/1: detected Individual → Hobby → savings=$100 → Overpaying
+  it("counts only fully Optimized tools, not Optimization Available/Overpaying", () => {
+    // OpenAI API (usage): savings = $0 → Optimized
+    // Claude $200/1: Max 20x → Pro → savings=$180 → Overpaying
     const agg = generateAggregateAudit([
       { tool: "OpenAI API", spend: 50, users: 1 },
-      { tool: "ChatGPT", spend: 100, users: 1 },
-      { tool: "Cursor", spend: 100, users: 1 },
+      { tool: "Claude", spend: 200, users: 1 },
     ]);
-    // Only OpenAI API is fully Optimized → 1/3 → 33%
-    expect(agg.teamEfficiencyScore).toBe(33);
+    // Only OpenAI API is fully Optimized → 1/2 → 50%
+    expect(agg.teamEfficiencyScore).toBe(50);
   });
 
   it("is 100 when all tools are already optimal", () => {
@@ -228,8 +236,8 @@ describe("teamEfficiencyScore", () => {
 
   it("is 0 when all tools are overpaying", () => {
     const agg = generateAggregateAudit([
-      { tool: "ChatGPT", spend: 100, users: 1 },
-      { tool: "Cursor", spend: 100, users: 1 },
+      { tool: "Claude", spend: 200, users: 1 },
+      { tool: "Copilot", spend: 500, users: 1 },
     ]);
     expect(agg.teamEfficiencyScore).toBe(0);
   });
@@ -240,18 +248,18 @@ describe("teamEfficiencyScore", () => {
 // ────────────────────────────────────────────────────────────────────────────
 describe("enhanced recommendations plan names", () => {
   it("populates currentPlan and recommendedPlan with actual plan names", () => {
-    const agg = generateAggregateAudit([{ tool: "ChatGPT", spend: 300, users: 1 }]);
+    const agg = generateAggregateAudit([{ tool: "Claude", spend: 200, users: 1 }]);
     const rec = agg.enhancedRecommendations[0];
-    expect(rec.currentPlan).toBe("Plus");
-    expect(rec.recommendedPlan).toBe("Free");
+    expect(rec.currentPlan).toBe("Max 20x");
+    expect(rec.recommendedPlan).toBe("Pro");
     expect(rec.currentPlan).not.toBe("Current");
     expect(rec.recommendedPlan).not.toBe("Optimized");
   });
 
-  it("recommends the cheapest ELIGIBLE plan by name (Cursor Individual → Hobby)", () => {
-    const agg = generateAggregateAudit([{ tool: "Cursor", spend: 100, users: 1 }]);
+  it("recommends the cheapest eligible verified plan by name (Claude Max → Pro)", () => {
+    const agg = generateAggregateAudit([{ tool: "Claude", spend: 123, users: 1 }]);
     const rec = agg.enhancedRecommendations[0];
-    expect(rec.recommendedPlan).toBe("Hobby");
+    expect(rec.recommendedPlan).toBe("Pro");
   });
 
   it("does not emit an enhanced recommendation for org tiers with no replacement", () => {
@@ -277,22 +285,27 @@ describe("enhanced recommendations plan names", () => {
 // Seat Handling — spend is total, not per-seat
 // ────────────────────────────────────────────────────────────────────────────
 describe("seat handling", () => {
-  it("treats spend as total organization cost, not per-seat", () => {
-    // 5 users, total spend $100 → $20/user → ChatGPT Plus.
-    // Free ($0) is an eligible downgrade from Plus (individual) → savings $100.
+  it("never multiplies a consumer per-user plan across seats (spend is not per-seat × seats)", () => {
+    // 5 users, total spend $100 → $20/user → ChatGPT Plus (a per-person consumer
+    // plan). Consumers are billed per identifiable PERSON, so Plus × 5 seats is
+    // never a defensible cost → no fabricated $0 optimized spend / $100 savings.
     const result = generateAudit("ChatGPT", 100, 5);
     expect(result.currentPlan).toBe("Plus");
-    expect(result.optimizedSpend).toBe(0);
-    expect(result.savings).toBe(100);
+    expect(result.recommendedPlan).toBe("");
+    expect(result.optimizedSpend).toBe(100);
+    expect(result.savings).toBe(0);
   });
 
-  it("scales optimized cost linearly with seat count for an individual tier", () => {
-    // $20/seat for both: 20/1 and 100/5 → both detected on Individual ($20),
-    // eligible cheaper tier is Hobby ($0) → optimized cost scales to $0.
+  it("does not fabricate $0 optimized cost by scaling an individual tier across seats", () => {
+    // $20/seat for both: 20/1 and 100/5 → both detected on Individual ($20).
+    // Hobby ($0) is free and never an automatic replacement → no savings is
+    // invented for either, so optimized cost stays the reported spend.
     const oneSeat = generateAudit("Cursor", 20, 1);
     const fiveSeats = generateAudit("Cursor", 100, 5);
-    expect(oneSeat.optimizedSpend).toBe(0);
-    expect(fiveSeats.optimizedSpend).toBe(0);
+    expect(oneSeat.savings).toBe(0);
+    expect(oneSeat.optimizedSpend).toBe(20);
+    expect(fiveSeats.savings).toBe(0);
+    expect(fiveSeats.optimizedSpend).toBe(100); // never 0×5
   });
 
   it("an org (business) tier does not silently fall to a free tier across seats", () => {
@@ -305,12 +318,13 @@ describe("seat handling", () => {
 
   it("excludes Business plan when below minimum users, falling to an eligible tier", () => {
     // Copilot Business requires min 5 users. With 3 seats, Business is excluded;
-    // $100/3 ≈ $33/seat → detected Pro+ (individual, power) → eligible Pro.
+    // $100/3 ≈ $33/seat → detected Pro+ (individual, power). Pro+ is a per-person
+    // consumer plan, so it is never multiplied by 3 seats → no fabricated savings.
     const result = generateAudit("Copilot", 100, 3);
     expect(result.currentPlan).toBe("Pro+");
-    expect(result.recommendedPlan).toBe("Pro");
-    expect(result.optimizedSpend).toBe(30); // Pro × 3
-    expect(result.savings).toBe(70);
+    expect(result.recommendedPlan).toBe("");
+    expect(result.optimizedSpend).toBe(100);
+    expect(result.savings).toBe(0);
   });
 });
 
@@ -318,13 +332,14 @@ describe("seat handling", () => {
 // Plan Eligibility — minUsers filtering
 // ────────────────────────────────────────────────────────────────────────────
 describe("plan eligibility", () => {
-  it("excludes plans with minUsers exceeding user count and downgrades within segment", () => {
-    // ChatGPT $100/1: Team(min 2)/Enterprise(min 10) excluded → Plus eligible.
+  it("excludes plans with minUsers exceeding user count and never auto-downgrades to free", () => {
+    // ChatGPT $100/1: Team(min 2)/Enterprise(min 10) excluded → Plus detected.
+    // Plus is unverified and Free is not an automatic replacement → $0 savings.
     const result = generateAudit("ChatGPT", 100, 1);
     expect(result.currentPlan).toBe("Plus");
-    expect(result.recommendedPlan).toBe("Free");
-    expect(result.optimizedSpend).toBe(0);
-    expect(result.savings).toBe(100);
+    expect(result.recommendedPlan).toBe("");
+    expect(result.optimizedSpend).toBe(100);
+    expect(result.savings).toBe(0);
   });
 
   it("keeps org tiers from bouncing to consumer tiers even when seats qualify", () => {
@@ -417,9 +432,14 @@ describe("optimization score", () => {
     expect(result.optimizationScore).toBe(100);
   });
 
-  it("returns 0 when savings equal current spend (fully overpaying)", () => {
-    const result = generateAudit("ChatGPT", 100, 1);
-    expect(result.optimizationScore).toBe(0);
+  it("returns a score below 100 for verified savings, but never 0 (no free/100% claims)", () => {
+    // Claude $200/1 → Max 20x → Pro savings $180 → score = 100 - 90 = 10. The
+    // score can never hit 0 because savings is never the entire spend (there is
+    // always a verified replacement cost > $0).
+    const result = generateAudit("Claude", 200, 1);
+    expect(result.savings).toBe(180);
+    expect(result.savings).not.toBe(200);
+    expect(result.optimizationScore).toBe(10);
   });
 
   it("returns 100 for a paid tier with no eligible lower-cost replacement", () => {
@@ -431,48 +451,48 @@ describe("optimization score", () => {
 
   it("aggregate score is calculated from total savings, not tool average", () => {
     const agg = generateAggregateAudit([
-      { tool: "ChatGPT", spend: 100, users: 1 }, // savings 100 → score 0
+      { tool: "Claude", spend: 200, users: 1 }, // savings 180 → score 10
       { tool: "OpenAI API", spend: 50, users: 1 }, // 0% savings → score 100
     ]);
-    // totalSpend=150, totalSavings=100 → score = 100 - (100/150)*100 ≈ 33.33
-    expect(agg.overallOptimizationScore).toBeCloseTo(33.33, 1);
+    // totalSpend=250, totalSavings=180 → score = 100 - (180/250)*100 = 28
+    expect(agg.overallOptimizationScore).toBeCloseTo(28, 1);
   });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
 // Status Thresholds — Overpaying > $20, Optimization Available > $5
-// (Using ChatGPT detected on Plus, so savings scale with spend for 1 user.)
+// (Claude "Max" selected explicitly: verified current = $100, Pro replacement =
+// $20. Reported spend drives the claimable savings, so spend = $20 gives $0,
+// $26 gives $6, $40 gives $20, $41 gives $21 — clean threshold boundaries.)
 // ────────────────────────────────────────────────────────────────────────────
 describe("status thresholds", () => {
   it("marks as Optimized when savings <= $5", () => {
-    // ChatGPT $5/1 → closest plan is Free → already on cheapest → savings $0.
-    const result = generateAudit("ChatGPT", 5, 1);
+    // Reported spend equals the Pro replacement cost → nothing claimable.
+    const result = generateAudit("Claude", 20, 1, undefined, "Max");
     expect(result.savings).toBe(0);
     expect(result.status).toBe("Optimized");
   });
 
   it("marks as Optimization Available when savings is $6-$20", () => {
-    // ChatGPT $15/1 → detected Plus → eligible Free → savings $15.
-    const result = generateAudit("ChatGPT", 15, 1);
-    expect(result.savings).toBe(15);
+    // Reported spend $26 → savings = 26 − 20 = $6.
+    const result = generateAudit("Claude", 26, 1, undefined, "Max");
+    expect(result.savings).toBe(6);
     expect(result.status).toBe("Optimization Available");
   });
 
   it("marks as Overpaying when savings > $20", () => {
-    // ChatGPT $21/1 → detected Plus → eligible Free → savings $21.
-    const result = generateAudit("ChatGPT", 21, 1);
+    // Reported spend $41 → savings = min(80, 41 − 20) = $21.
+    const result = generateAudit("Claude", 41, 1, undefined, "Max");
     expect(result.savings).toBe(21);
     expect(result.status).toBe("Overpaying");
   });
 
   it("boundaries: exactly $20 is Optimization Available, $21 is Overpaying", () => {
-    // ChatGPT $20/1 → detected Plus → savings $20 → Optimization Available.
-    const at20 = generateAudit("ChatGPT", 20, 1);
+    const at20 = generateAudit("Claude", 40, 1, undefined, "Max");
     expect(at20.savings).toBe(20);
     expect(at20.status).toBe("Optimization Available");
 
-    // $21 → savings $21 → Overpaying (21 > 20).
-    const at21 = generateAudit("ChatGPT", 21, 1);
+    const at21 = generateAudit("Claude", 41, 1, undefined, "Max");
     expect(at21.savings).toBe(21);
     expect(at21.status).toBe("Overpaying");
   });
@@ -535,9 +555,12 @@ describe("edge cases", () => {
     const result = generateAudit("ChatGPT", 1_000_000, 50);
     // $20,000/seat → detected Business Premium (org). The org guard blocks a drop
     // to Plus/Free, but Business Standard is the SAME segment and cheaper → valid.
+    // Savings are the VERIFIED spread (125×50 − 25×50 = 5000), never the cheapest
+    // plan across the whole $1M spend.
     expect(result.currentPlan).toBe("Business Premium");
     expect(result.recommendedPlan).toBe("Business Standard");
-    expect(result.savings).toBe(1_000_000 - 25 * 50); // 998,750
+    expect(result.savings).toBe(5000);
+    expect(result.optimizedSpend).toBe(995000);
   });
 
   it("empty aggregate has zero totals and score 100", () => {
@@ -588,10 +611,10 @@ describe("edge cases", () => {
 
   it("duplicate tool entries are merged so savings are never double-counted", () => {
     // The same product listed twice is the same subscription surface. Auditing
-    // each row independently would claim a Free downgrade on both and inflate
-    // savings (100 + 200 = 300). Merging spend + seats into one tool audits the
-    // combined 2 seats once: $150/seat detects Business Premium with Business
-    // Standard as the only eligible (same-segment) downgrade → savings 250.
+    // each row independently could double-count savings. Merging spend + seats
+    // into one tool audits the combined 2 seats once: $150/seat detects Business
+    // Premium with Business Standard as the only eligible (same-segment)
+    // downgrade → verified savings = 250 − 50 = 200, capped by reported spend.
     const agg = generateAggregateAudit([
       { tool: "ChatGPT", spend: 100, users: 1 },
       { tool: "ChatGPT", spend: 200, users: 1 },
@@ -599,8 +622,9 @@ describe("edge cases", () => {
     expect(agg.tools.length).toBe(1);
     expect(agg.tools[0].currentSpend).toBe(300);
     expect(agg.totalCurrentSpend).toBe(300);
-    expect(agg.totalSavings).toBe(250);
-    // The two duplicated rows can never claim 2 × consumer "Free" downgrades.
+    expect(agg.totalSavings).toBe(200);
+    expect(agg.totalOptimizedSpend).toBe(100);
+    // The two duplicated rows can never claim the fabricated consumer downgrades.
     expect(agg.totalSavings).not.toBe(300);
   });
 
@@ -622,10 +646,11 @@ describe("edge cases", () => {
 // ────────────────────────────────────────────────────────────────────────────
 describe("currentPlan detection", () => {
   it("detects closest plan by cost per seat", () => {
-    // ChatGPT: spend=$20/user → matches Plus ($20).
+    // ChatGPT: spend=$20/user → matches Plus ($20). Plus is unverified and Free
+    // is never an automatic replacement → no downgrade is recommended.
     const result = generateAudit("ChatGPT", 20, 1);
     expect(result.currentPlan).toBe("Plus");
-    expect(result.recommendedPlan).toBe("Free");
+    expect(result.recommendedPlan).toBe("");
   });
 
   it("detects closest plan for org teams and reports no ineligible downgrade", () => {
@@ -726,11 +751,14 @@ describe("selected plan overrides spend/seat detection", () => {
 
   it("keeps a selected priced plan that is present and seat-valid", () => {
     // Copilot $100/mo at 3 seats would be detected as Pro+; an explicit Pro
-    // selection is honored instead.
+    // selection is honored instead. Pro is a per-person consumer plan, so it is
+    // never seat-multiplied → no fabricated $100 savings or Free downgrade.
     const result = generateAudit("Copilot", 100, 3, undefined, "Pro");
     expect(result.currentPlan).toBe("Pro");
-    expect(result.recommendedPlan).toBe("Free");
-    expect(result.savings).toBe(100);
+    expect(result.recommendedPlan).toBe("");
+    expect(result.savings).toBe(0);
+    expect(result.optimizedSpend).toBe(100);
+    expect(result.recommendation).toContain("per-person consumer");
   });
 
   it("falls back to detection when the selected plan has an unmet seat minimum", () => {
@@ -744,7 +772,7 @@ describe("selected plan overrides spend/seat detection", () => {
   it("ignores an unknown plan name and uses detection", () => {
     const result = generateAudit("ChatGPT", 20, 1, undefined, "Not a Real Plan");
     expect(result.currentPlan).toBe("Plus");
-    expect(result.recommendedPlan).toBe("Free");
+    expect(result.recommendedPlan).toBe("");
   });
 
   it("passes the selected plan through aggregate audits per tool", () => {
@@ -758,6 +786,81 @@ describe("selected plan overrides spend/seat detection", () => {
     expect(cursor?.currentPlan).toBe("Enterprise");
     expect(cursor?.savings).toBe(0);
     expect(chatgpt?.currentPlan).toBe("Plus");
-    expect(chatgpt?.recommendedPlan).toBe("Free");
+    expect(chatgpt?.recommendedPlan).toBe("");
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Verified-replacement rules (regression: savings are never fabricated from a
+// free/unverified tier or by seat-multiplying a consumer plan).
+// ────────────────────────────────────────────────────────────────────────────
+describe("verified replacement rules", () => {
+  it("never recommends Free or claims savings for Claude Pro at 5 seats / $200", () => {
+    const result = generateAudit("Claude", 200, 5, undefined, "Pro");
+    expect(result.currentPlan).toBe("Pro");
+    expect(result.recommendedPlan).toBe("");
+    expect(result.savings).toBe(0);
+    expect(result.optimizedSpend).toBe(200); // never fabricated as $0
+    expect(result.status).toBe("Optimized");
+    expect(result.recommendation).not.toMatch(/Switch to the Free plan/);
+    expect(result.recommendation).toContain("No verified lower-cost");
+    expect(result.recommendation).toContain("per-person consumer");
+  });
+
+  it("computes savings only from verified replacement cost (paid → cheaper paid)", () => {
+    // ChatGPT Business Premium 10 seats: verified $125/seat → Business Standard
+    // $25/seat → savings = 1250 − 250 = 1000; optimized spend = verified $250.
+    const result = generateAudit("ChatGPT", 1250, 10, undefined, "Business Premium");
+    expect(result.currentPlan).toBe("Business Premium");
+    expect(result.recommendedPlan).toBe("Business Standard");
+    expect(result.savings).toBe(1000);
+    expect(result.optimizedSpend).toBe(250);
+  });
+
+  it("claims $0 savings — never a fabricated 100% — when no eligible replacement exists", () => {
+    // Cursor Business (org) has no same-segment cheaper tier.
+    const result = generateAudit("Cursor", 280, 7);
+    expect(result.savings).toBe(0);
+    expect(result.optimizedSpend).toBe(280);
+    expect(result.recommendation).toContain("No verified lower-cost");
+  });
+
+  it("never multiplies an individual/consumer plan by seat count (Cursor $100 / 5)", () => {
+    const result = generateAudit("Cursor", 100, 5);
+    expect(result.currentPlan).toBe("Individual");
+    expect(result.recommendedPlan).toBe("");
+    expect(result.savings).toBe(0);
+    expect(result.optimizedSpend).toBe(100); // never $20 × 5 = $100 "savings"
+  });
+
+  it("respects team per-seat pricing and the min-seat floor (Claude Team)", () => {
+    const oneSeat = generateAudit("Claude", 50, 1, undefined, "Team");
+    expect(oneSeat.currentPlan).not.toBe("Team"); // selection ignored below min 2
+
+    const twoSeats = generateAudit("Claude", 50, 2, undefined, "Team");
+    expect(twoSeats.currentPlan).toBe("Team"); // honored once >= min seats
+    expect(twoSeats.savings).toBe(0); // no verified cheaper org-tier replacement
+    expect(twoSeats.optimizedSpend).toBe(50); // never a fabricated $0
+  });
+
+  it("does not fabricate savings when reported spend already equals the replacement cost", () => {
+    // Claude Max selected, spend $20/seat = exactly the verified Pro replacement
+    // cost → nothing claimable.
+    const result = generateAudit("Claude", 20, 1, undefined, "Max");
+    expect(result.currentPlan).toBe("Max");
+    expect(result.savings).toBe(0);
+    expect(result.optimizedSpend).toBe(20);
+  });
+
+  it("never prices an unverified plan (Gemini/ChatGPT) or claims a $0 downgrade", () => {
+    const gemini = generateAudit("Gemini", 100, 1);
+    expect(gemini.savings).toBe(0);
+    expect(gemini.recommendedPlan).toBe("");
+    expect(gemini.recommendation).toContain("not verified");
+
+    const chatgpt = generateAudit("ChatGPT", 20, 1);
+    expect(chatgpt.savings).toBe(0);
+    expect(chatgpt.recommendedPlan).toBe("");
+    expect(chatgpt.recommendation).toContain("not verified");
   });
 });

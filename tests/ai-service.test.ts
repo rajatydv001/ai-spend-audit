@@ -30,6 +30,7 @@ import {
   generateVendorConsolidationSuggestions,
   generateSavingsAnalysis,
 } from "@/lib/services/ai-service";
+import { generateAggregateAudit } from "@/lib/audit-engine";
 
 const sharedClient = (MockOpenAI as unknown as {
   inst: { chat: { completions: { create: (arg: Record<string, unknown>) => Promise<{ choices: { message: { content: string } }[] }> } } };
@@ -76,6 +77,37 @@ describe("fallback (no OpenAI API key) — no external calls", () => {
     const low = { ...auditData, overallOptimizationScore: 10 };
     const insights = await generateOptimizationInsights(low);
     expect(insights.some((i) => i.toLowerCase().includes("low"))).toBe(true);
+  });
+
+  it("mirrors the engine's verified savings ($0) — never invents an overpaying claim", async () => {
+    // Claude Pro at 5 seats / $200 has no verified lower-cost replacement. The
+    // AI consumes the persisted engine result, so its fallback must agree: no
+    // "overpaying" fabrication, no invented dollar figure.
+    const zero = generateAggregateAudit([
+      { tool: "Claude", spend: 200, users: 5, plan: "Pro" },
+    ]);
+    expect(zero.totalSavings).toBe(0);
+
+    const insights = await generateOptimizationInsights(zero);
+    expect(insights.some((i) => i.toLowerCase().includes("overpaying"))).toBe(false);
+    expect(insights.some((i) => /\$\d+/.test(i) && i.includes("savings"))).toBe(false);
+
+    const savings = await generateSavingsAnalysis(zero);
+    expect(savings).toContain("$0/month");
+    expect(savings).toContain("0.0%");
+    expect(savings).not.toContain("save $200");
+  });
+
+  it("AI insights match the engine's verified savings when a replacement exists", async () => {
+    // Claude 200/1 → Max 20x → Pro → verified savings $180.
+    const agg = generateAggregateAudit([{ tool: "Claude", spend: 200, users: 1 }]);
+    expect(agg.totalSavings).toBe(180);
+
+    const insights = await generateOptimizationInsights(agg);
+    expect(insights.some((i) => i.includes("$180"))).toBe(true);
+
+    const savings = await generateSavingsAnalysis(agg);
+    expect(savings).toContain("$180/month");
   });
 });
 

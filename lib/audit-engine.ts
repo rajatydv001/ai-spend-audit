@@ -75,23 +75,93 @@ export interface AggregateAuditResult {
   enhancedRecommendations: EnhancedRecommendation[];
 }
 
+/** Round money to 2 decimals to avoid float drift. */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 interface OptimalPlan {
   currentPlan: ActiveToolPlan;
-  cheapestEligible: ActiveToolPlan | null;
-  estimatedCost: number;
+  /** Verified, eligible lower-cost replacement (never a free tier). */
+  replacement: ActiveToolPlan | null;
+  /** Verified total cost of the current plan at the given seat count, or null
+   *  when no defensible figure exists (unverified, custom, seat bounds...). */
+  currentCost: number | null;
+  /** Verified total cost of the replacement at the given seat count. */
+  replacementCost: number | null;
   savings: number;
+  /**
+   * Why no verified savings is claimed. Present exactly when savings === 0 so
+   * the recommendation can explain itself honestly instead of fabricating an
+   * ungrounded downgrade.
+   */
+  noReplacementReason:
+    | "custom"
+    | "free_current"
+    | "unverified_current"
+    | "seat_bounds"
+    | "consumer_seats"
+    | "no_eligible"
+    | null;
+}
+
+/**
+ * Verified cost of a plan at a given seat count, or null when the plan has no
+ * defensible fixed price for `users`:
+ *   - custom (contact-sales) and usage-based plans carry no fixed list price;
+ *   - unverified plans (no official-source confirmation) are never priced;
+ *   - min/max seat violations make the tier unavailable at `users`;
+ *   - a consumer (non-seat-based) plan is billed per identifiable PERSON, so it
+ *     is only priced for exactly one user. Multiplying a consumer license by an
+ *     arbitrary seat count would fabricate cost.
+ */
+function planCostForUsers(plan: ActiveToolPlan, users: number): number | null {
+  if (!plan.verified) return null;
+  if (plan.custom || plan.usageBased) return null;
+  if (plan.costPerUser <= 0) return null;
+  if (plan.minUsers && users < plan.minUsers) return null;
+  if (plan.maxUsers && users > plan.maxUsers) return null;
+  if (!plan.seatBased && users !== 1) return null;
+  return round2(plan.costPerUser * users);
+}
+
+/**
+ * Human reason why the current plan yields no verified cost, in precedence
+ * order. Mirrors the null branches of planCostForUsers so messages distinguish
+ * custom pricing, a free tier, a per-person consumer tier carrying seats, an
+ * unverified list price, and out-of-bounds seat counts.
+ */
+function currentPlanNoCostReason(
+  plan: ActiveToolPlan,
+  users: number
+): OptimalPlan["noReplacementReason"] {
+  if (plan.custom) return "custom";
+  if (plan.segment === "free") return "free_current";
+  if (!plan.verified) return "unverified_current";
+  if (plan.costPerUser <= 0) return "unverified_current";
+  if (plan.minUsers && users < plan.minUsers) return "seat_bounds";
+  if (plan.maxUsers && users > plan.maxUsers) return "seat_bounds";
+  if (!plan.seatBased && users !== 1) return "consumer_seats";
+  return null;
 }
 
 /**
  * Determine the current plan (the active tier whose per-seat list price is
- * closest to the reported spend-per-seat) and the best ELIGIBLE downgrade.
+ * closest to the reported spend-per-seat) and the best VERIFIED eligible
+ * downgrade.
  *
- * Eligibility is segment-aware (see `isReplacementValid`): cheapest is NOT
- * automatically the right answer. A strictly-cheaper replacement is only
- * offered when it addresses an equal-or-lower customer segment and does not
- * illegally cross an organization/consumer or power/free boundary. If no
- * eligible lower-cost replacement exists, savings is 0 and no plan is
- * recommended (we never claim 100% savings via a forbidden downgrade).
+ * Savings are only ever claimed as verified current cost − verified replacement
+ * cost, capped at the spread across the user's real reported spend (never more
+ * than the user actually pays, never when reported spend already sits at or
+ * below the replacement's verified cost). Claimed numbers are grounded in
+ * VERIFIED official list prices:
+ *   - a free tier is never an automatic replacement — its $0 price is an
+ *     absence of charge, not a verified entitlement to downgrade;
+ *   - unverified, custom, and usage-based plans carry no defensible price;
+ *   - consumer/individual licenses are per-person and never multiply by seats;
+ *   - organization tiers respect official per-seat pricing and seat bounds.
+ * When no verified lower-cost replacement exists, savings is 0, no plan is
+ * recommended, and `noReplacementReason` lets the message explain honestly.
  */
 function calculateOptimalPlan(
   tool: string,
@@ -103,72 +173,138 @@ function calculateOptimalPlan(
   const surface = getPlanSurface(tool, date);
   if (!surface) return null;
 
-  // Custom + usage plans have no fixed price — exclude from pricing optimization.
+  // Custom + usage plans have no fixed price — excluded from pricing.
   const priced = surface.filter((p) => !p.custom && !p.usageBased);
   const validPlans = priced.filter(
-    (plan) => !plan.minUsers || plan.minUsers <= users
+    (p) =>
+      (!p.minUsers || p.minUsers <= users) &&
+      (!p.maxUsers || p.maxUsers >= users)
   );
 
   if (validPlans.length === 0) return null;
 
   const costPerSeat = users > 0 ? spend / users : 0;
-  const detected = validPlans.reduce((closest, candidate) => {
-    const diff = Math.abs(candidate.costPerUser - costPerSeat);
-    const closestDiff = Math.abs(closest.costPerUser - costPerSeat);
-    return diff < closestDiff ? candidate : closest;
-  });
+
+  // For a paid audit (spend > 0) a free tier is not a plausible current plan —
+  // the user pays for this tool, so detection must land on a priced tier.
+  const detectionPool =
+    spend > 0 ? validPlans.filter((p) => p.segment !== "free") : validPlans;
+  const detected =
+    detectionPool.length > 0
+      ? detectionPool.reduce((closest, candidate) => {
+          const diff = Math.abs(candidate.costPerUser - costPerSeat);
+          const closestDiff = Math.abs(closest.costPerUser - costPerSeat);
+          return diff < closestDiff ? candidate : closest;
+        })
+      : validPlans[0];
 
   // An explicitly selected plan is authoritative when it exists in the active
-  // surface and satisfies its seat minimum; otherwise fall back to the
-  // spend-per-seat estimate. Custom (contact-sales) plans are valid selections:
-  // they are displayed as the current tier, but having no fixed price
-  // (costPerUser 0) they can never produce a fabricated cheaper downgrade.
+  // surface and satisfies its seat bounds; otherwise fall back to the
+  // spend-per-seat estimate.
   const currentPlan = plan
     ? (surface.find(
-        (p) => p.name === plan && (!p.minUsers || p.minUsers <= users)
+        (p) =>
+          p.name === plan &&
+          (!p.minUsers || p.minUsers <= users) &&
+          (!p.maxUsers || p.maxUsers >= users)
       ) ?? detected)
     : detected;
 
-  // Strictly-cheaper, segment-eligible replacements only.
-  const eligible = validPlans
-    .filter((p) => p.costPerUser < currentPlan.costPerUser)
-    .filter((p) => isReplacementValid(p, currentPlan))
-    .sort((a, b) => a.costPerUser - b.costPerUser);
+  const currentCost = planCostForUsers(currentPlan, users);
+  let replacement: ActiveToolPlan | null = null;
+  let replacementCost: number | null = null;
+  let savings = 0;
+  let noReplacementReason: OptimalPlan["noReplacementReason"] = null;
 
-  const cheapestEligible = eligible[0] ?? null;
-  const estimatedCost = cheapestEligible
-    ? cheapestEligible.costPerUser * users
-    : spend;
-  const savings = cheapestEligible
-    ? Math.max(0, spend - estimatedCost)
-    : 0;
+  if (currentCost === null) {
+    noReplacementReason = currentPlanNoCostReason(currentPlan, users);
+  } else {
+    // Strictly-cheaper, VERIFIED, segment-eligible replacements only. Free tiers
+    // are excluded: a $0 plan is not a verified enforceable cost, so claiming it
+    // as a replacement would invent savings. Custom/usage never enter `priced`.
+    const cheaper = validPlans
+      .filter((p) => p.verified && p.costPerUser > 0 && p.segment !== "free")
+      .filter((p) => p.costPerUser < currentPlan.costPerUser)
+      .filter((p) => isReplacementValid(p, currentPlan))
+      .sort((a, b) => a.costPerUser - b.costPerUser);
 
-  return { currentPlan, cheapestEligible, estimatedCost, savings };
+    for (const candidate of cheaper) {
+      const cost = planCostForUsers(candidate, users);
+      if (cost !== null) {
+        replacement = candidate;
+        replacementCost = cost;
+        break;
+      }
+    }
+
+    if (
+      replacement &&
+      replacementCost !== null &&
+      currentCost > replacementCost
+    ) {
+      const verifiedSavings = currentCost - replacementCost;
+      const claimableBySpend = spend - replacementCost;
+      if (claimableBySpend > 0) {
+        savings = round2(Math.min(verifiedSavings, claimableBySpend));
+      } else {
+        // Reported spend already at/below the verified replacement's cost —
+        // nothing defensible to claim.
+        noReplacementReason = "no_eligible";
+      }
+    } else {
+      noReplacementReason = "no_eligible";
+    }
+  }
+
+  return {
+    currentPlan,
+    replacement,
+    currentCost,
+    replacementCost,
+    savings,
+    noReplacementReason,
+  };
 }
 
 /**
- * Generate recommendation based on tool and usage patterns.
+ * Generate recommendation for the audited tool. When verified savings exist the
+ * message names the replacement and the exact numbers. Otherwise it explains WHY
+ * no verified lower-cost replacement is claimable based on the current plan's
+ * data quality and eligibility, so the UI never fabricates a downgrade claim.
  */
 function generateRecommendation(
   tool: string,
   spend: number,
   users: number,
-  savings: number,
-  date: Date,
-  plan?: string
+  optimal: OptimalPlan | null
 ): string {
-  const optimal = calculateOptimalPlan(tool, spend, users, date, plan);
+  if (!optimal) return "";
+  const planName = optimal.currentPlan.name;
+  const userPhrase = `${users} user${users > 1 ? "s" : ""} / $${spend}/mo`;
 
-  if (savings === 0 || !optimal?.cheapestEligible) {
-    if (!optimal) return "";
-    const planName = optimal.currentPlan.name;
-    if (optimal.currentPlan.custom) {
-      return `No verified lower-cost replacement found for your ${tool} setup (${planName}) at ${users} user${users > 1 ? "s" : ""} / $${spend}/mo. ${planName} pricing is custom (contact-sales), so it cannot be compared to published monthly list prices here — ask your account team for a rate review.`;
-    }
-    return `No verified lower-cost replacement found for your ${tool} setup (${planName}) at ${users} user${users > 1 ? "s" : ""} / $${spend}/mo. Downgrading would require a plan that is not an eligible replacement (e.g. an organization tier dropping to a consumer tier) or a free plan that is not appropriate.`;
+  if (
+    optimal.savings > 0 &&
+    optimal.replacement &&
+    optimal.replacementCost !== null
+  ) {
+    return `Switch to the ${optimal.replacement.name} plan. Estimated savings: $${optimal.savings}/mo ($${spend}/mo → $${optimal.replacementCost}/mo).`;
   }
 
-  return `Switch to the ${optimal.cheapestEligible.name} plan. Estimated savings: $${savings}/mo ($${spend}/mo → $${optimal.estimatedCost}/mo).`;
+  switch (optimal.noReplacementReason) {
+    case "custom":
+      return `No verified lower-cost replacement found for your ${tool} setup (${planName}) at ${userPhrase}. ${planName} pricing is custom (contact-sales), so it cannot be compared to published monthly list prices here — ask your account team for a rate review.`;
+    case "free_current":
+      return `No verified lower-cost replacement found for your ${tool} setup (${planName}) at ${userPhrase}. ${planName} is a free tier with no monthly cost, so there is nothing to optimize.`;
+    case "consumer_seats":
+      return `No verified lower-cost replacement found for your ${tool} setup (${planName}) at ${userPhrase}. ${planName} is a per-person consumer plan; multiplying its list price by ${users} seats would fabricate savings, and a separate verified lower-cost plan was not found for ${users} seats.`;
+    case "unverified_current":
+      return `No verified lower-cost replacement found for your ${tool} setup (${planName}) at ${userPhrase}. ${planName}'s list price is not verified against an official source, so an estimated downgrade would not produce a defensible savings number.`;
+    case "seat_bounds":
+      return `No verified lower-cost replacement found for your ${tool} setup (${planName}) at ${userPhrase}. ${planName} is only available outside this seat count (${users} seats), so it cannot price a verified reduction.`;
+    case "no_eligible":
+    default:
+      return `No verified lower-cost replacement found for your ${tool} setup (${planName}) at ${userPhrase}. Every currently-cheaper plan is either not verified, not an eligible downgrade for your segment, or below its minimum seat count.`;
+  }
 }
 
 /**
@@ -291,7 +427,7 @@ function auditSingleTool(
   if (savings > 20) status = "Overpaying";
   else if (savings > 5) status = "Optimization Available";
 
-  const recommendation = generateRecommendation(tool, spend, users, savings, date, plan);
+  const recommendation = generateRecommendation(tool, spend, users, optimal);
 
   return {
     tool,
@@ -302,7 +438,7 @@ function auditSingleTool(
     savings,
     optimizationScore,
     currentPlan: optimal?.currentPlan.name ?? "",
-    recommendedPlan: optimal?.cheapestEligible?.name ?? "",
+    recommendedPlan: optimal?.replacement?.name ?? "",
   };
 }
 

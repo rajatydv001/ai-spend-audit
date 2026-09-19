@@ -196,7 +196,7 @@ function DashboardContent() {
           <p className="text-gray-400 mt-1">
             {audits.length} audit{audits.length !== 1 ? "s" : ""} completed
             {entitlements &&
-              ` · ${entitlements.audit.remaining} of ${entitlements.audit.limit} audits left this month`}
+              ` · ${entitlements.audit.remaining} of ${entitlements.audit.limit} audits left in the last 30 days`}
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0 self-start">
@@ -252,8 +252,8 @@ function DashboardContent() {
             title="Audit limit reached"
             description={
               entitlements!.plan === "FREE"
-                ? `You have used all ${entitlements!.audit.limit} audits available this month on your free plan. Upgrade to Pro for 50 audits per month, AI insights, and advanced analytics.`
-                : `You have used all ${entitlements!.audit.limit} audits available this month on your ${entitlements!.plan.toLowerCase()} plan. All plans have limits — contact us for enterprise capacity.`
+                ? `You have used all ${entitlements!.audit.limit} audits available in the last 30 days on your free plan. Upgrade to Pro for 50 audits per 30 days, AI insights, and advanced analytics.`
+                : `You have used all ${entitlements!.audit.limit} audits available in the last 30 days on your ${entitlements!.plan.toLowerCase()} plan. All plans have limits — contact us for enterprise capacity.`
             }
           />
         </motion.div>

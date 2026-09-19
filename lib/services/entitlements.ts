@@ -78,7 +78,7 @@ export interface UserEntitlements {
  * the verified subscription row only (plan + status); limits and features come
  * from the plan config, never from client input or from stored limit columns
  * that a stale webhook could have left behind. Audit usage is measured over
- * the rolling 30-day window the product plan markets ("5 audits per month").
+ * the rolling 30-day window the product plan markets ("5 audits per 30 days").
  */
 export async function getUserEntitlements(userId: string): Promise<UserEntitlements> {
   if (!userId) {
@@ -111,7 +111,7 @@ export async function getUserEntitlements(userId: string): Promise<UserEntitleme
   const [auditCount, exportCount] = await Promise.all([
     prisma.audit.count({ where: { userId, createdAt: { gte: windowStart } } }),
     // Exports are metered over the same rolling 30-day window as audits,
-    // matching the product marketing ("5 audits/exports per month") instead of
+    // matching the product marketing ("5 audits/exports per 30 days") instead of
     // counting lifetime usage.
     prisma.savedReport.count({ where: { userId, createdAt: { gte: windowStart } } }),
   ]);

@@ -17,7 +17,7 @@ const PLANS = [
     price: "$0",
     description: "Get started with basic audits",
     features: [
-      { text: "5 audits per month", included: true },
+      { text: "5 audits per 30 days", included: true },
       { text: "3 PDF exports", included: true },
       { text: "Basic analytics", included: true },
       { text: "AI-powered insights", included: false },
@@ -34,7 +34,7 @@ const PLANS = [
     period: "/month",
     description: "For growing teams that need deeper insights",
     features: [
-      { text: "50 audits per month", included: true },
+      { text: "50 audits per 30 days", included: true },
       { text: "100 PDF exports", included: true },
       { text: "Advanced analytics", included: true },
       { text: "AI-powered insights", included: true },

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
+import type { SubscriptionStatus } from "@prisma/client";
 import {
   isPaidPlan,
   effectivePlan,
@@ -75,7 +76,15 @@ describe("P1-D plan gating — effective plan resolution", () => {
   });
 
   it("fails closed for CANCELED/PAST_DUE/INCOMPLETE/null/unknown status", () => {
-    for (const status of ["CANCELED", "PAST_DUE", "INCOMPLETE", null, undefined, "BANNED" as never]) {
+    const statuses = [
+      "CANCELED",
+      "PAST_DUE",
+      "INCOMPLETE",
+      null,
+      undefined,
+      "BANNED" as never,
+    ] as (SubscriptionStatus | null | undefined)[];
+    for (const status of statuses) {
       expect(isPaidPlan("PRO", status)).toBe(false);
       expect(effectivePlan("PRO", status)).toBe("FREE");
     }
@@ -340,7 +349,7 @@ describe("P1-D plan gating — protected API routes", () => {
 
   it("GET /api/entitlements reflects the effective server-side plan", async () => {
     mocks.findUnique.mockResolvedValue({ id: "u1", subscription: null });
-    const res = await entitlementsGET();
+    const res = await entitlementsGET(new Request("http://localhost/api/entitlements"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.plan).toBe("FREE");
@@ -399,7 +408,7 @@ describe("P1-D plan gating — protected API routes", () => {
 
   it("GET /api/analytics/departments returns 403 for a Free user", async () => {
     mocks.findUnique.mockResolvedValue({ id: "u1", subscription: null });
-    const res = await analyticsDepartmentsGET();
+    const res = await analyticsDepartmentsGET(new Request("http://localhost/api/analytics/departments"));
     expect(res.status).toBe(403);
   });
 });

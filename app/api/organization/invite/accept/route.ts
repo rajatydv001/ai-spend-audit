@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { acceptInvite } from "@/lib/services/organization-service";
 import { requireUserId } from "@/lib/auth/dal";
+import { assertFeature } from "@/lib/services/entitlements";
 import { parseBody, withErrorHandling } from "@/lib/errors";
 import { rateLimitOrThrow } from "@/lib/services/rate-limit";
 import { z } from "zod";
@@ -14,6 +15,7 @@ export const POST = withErrorHandling(async (request: Request) => {
   await rateLimitOrThrow(`invite-accept:${userId}`, 10, 15 * 60 * 1000);
   const { token } = await parseBody(request, acceptInviteSchema);
 
+  await assertFeature(userId, "team");
   await acceptInvite(token, userId);
   return NextResponse.json({ success: true });
 });

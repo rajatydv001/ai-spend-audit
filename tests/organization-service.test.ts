@@ -317,8 +317,8 @@ describe("getInviteSummary", () => {
     recipientId: null,
     role: "ANALYST",
     expiresAt: new Date(Date.now() + 10000),
-    acceptedAt: null,
-    declinedAt: null,
+    acceptedAt: null as Date | null,
+    declinedAt: null as Date | null,
     organization: { name: "Acme" },
   };
 

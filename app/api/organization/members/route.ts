@@ -3,6 +3,7 @@ import { inviteMember, updateMemberRole, removeMember } from "@/lib/services/org
 import { sendInviteEmail } from "@/lib/services/notification-service";
 import { requireUserId } from "@/lib/auth/dal";
 import { requireOrgPermission } from "@/lib/auth/authorization";
+import { assertFeature } from "@/lib/services/entitlements";
 import { parseBody, withErrorHandling, forbidden } from "@/lib/errors";
 import { rateLimitOrThrow } from "@/lib/services/rate-limit";
 import { inviteMemberSchema, memberActionSchema, memberRoleUpdateSchema } from "@/lib/validation/schemas";
@@ -15,6 +16,7 @@ export const POST = withErrorHandling(async (request: Request) => {
 
   await requireOrgPermission(userId, orgId, "member:invite");
   await rateLimitOrThrow(`members:${userId}`, 30, MEMBER_ACTIONS_WINDOW_MS, "Too many invite attempts. Please try again later.");
+  await assertFeature(userId, "team");
 
   const { invite, inviteUrl, organizationName, senderName } = await inviteMember(orgId, email, role, userId);
   const emailResult = await sendInviteEmail({
@@ -37,6 +39,7 @@ export const PATCH = withErrorHandling(async (request: Request) => {
 
   await requireOrgPermission(userId, orgId, "member:update");
   await rateLimitOrThrow(`members:${userId}`, 30, MEMBER_ACTIONS_WINDOW_MS, "Too many member updates. Please try again later.");
+  await assertFeature(userId, "team");
 
   if (memberId === userId) {
     throw forbidden("You cannot change your own role");
@@ -52,6 +55,7 @@ export const DELETE = withErrorHandling(async (request: Request) => {
 
   await requireOrgPermission(userId, orgId, "member:remove");
   await rateLimitOrThrow(`members:${userId}`, 30, MEMBER_ACTIONS_WINDOW_MS, "Too many member removals. Please try again later.");
+  await assertFeature(userId, "team");
 
   if (memberId === userId) {
     throw forbidden("You cannot remove yourself");

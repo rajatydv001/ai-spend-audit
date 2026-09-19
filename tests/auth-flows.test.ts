@@ -248,7 +248,7 @@ describe("login", () => {
 
     for (const evil of ["https://evil.example", "//evil.example", "/\\evil.example", "/not ok"]) {
       mocks.createSession.mockClear();
-      redirect.mockClear();
+      vi.mocked(redirect).mockClear();
       await loginAction(undefined, loginForm({ next: evil }));
       expect(redirect).toHaveBeenCalledWith("/dashboard");
     }

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   requireUserId: vi.fn(),
@@ -13,7 +13,10 @@ import * as rateLimitModule from "@/lib/services/rate-limit";
 import { POST } from "@/app/api/pricing/compare/route";
 
 describe("pricing/compare authorization", () => {
-  let limiterSpy: ReturnType<typeof vi.spyOn>;
+  let limiterSpy: MockInstance<
+    Parameters<typeof rateLimitModule.rateLimitOrThrow>,
+    ReturnType<typeof rateLimitModule.rateLimitOrThrow>
+  >;
 
   beforeEach(() => {
     vi.clearAllMocks();

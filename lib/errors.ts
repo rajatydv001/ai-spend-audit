@@ -173,7 +173,7 @@ type RouteContext = { params: Promise<Record<string, string>> };
  */
 export function withErrorHandling<
   TArgs extends unknown[],
-  TContext extends RouteContext | undefined = RouteContext
+  TContext extends RouteContext = RouteContext
 >(
   handler: (
     request: Request,
@@ -183,11 +183,11 @@ export function withErrorHandling<
 ) {
   return async (
     request: Request,
-    context: TContext,
+    context?: TContext,
     ...rest: TArgs
   ): Promise<NextResponse | Response> => {
     try {
-      const result = await handler(request, context, ...rest);
+      const result = await handler(request, context as TContext, ...rest);
       if (result instanceof NextResponse || result instanceof Response) {
         return result;
       }

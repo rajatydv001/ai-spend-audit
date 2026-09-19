@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { listPendingInvites } from "@/lib/services/organization-service";
 import { requireUserId } from "@/lib/auth/dal";
+import { assertFeature } from "@/lib/services/entitlements";
 import { withErrorHandling, badRequest } from "@/lib/errors";
 
 export const GET = withErrorHandling(async (request: Request) => {
@@ -12,6 +13,7 @@ export const GET = withErrorHandling(async (request: Request) => {
     throw badRequest("orgId is required");
   }
 
+  await assertFeature(userId, "team");
   const invites = await listPendingInvites(orgId, userId);
   return NextResponse.json({ invites });
 });

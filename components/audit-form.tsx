@@ -305,8 +305,6 @@ export default function AuditForm({ variant = "homepage", onAuditCreated }: { va
                   } else if (res.status === 403) {
                     const data = await res.json().catch(() => ({}));
                     toast.error(data.error ?? "Audit limit reached. Upgrade your plan for more audits.");
-                  } else if (res.status === 409) {
-                    toast.error("This audit was already saved.");
                   } else if (res.status === 429) {
                     toast.error("You're moving fast — please wait a moment and try again.", { duration: 6000 });
                   } else {

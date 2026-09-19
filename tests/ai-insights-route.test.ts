@@ -104,18 +104,15 @@ describe("POST /api/ai/insights — provenance flag + type variants", () => {
     }
   );
 
-  it.each([
-    ["insights", "genInsights" as const],
-    ["summary", "genSummary" as const],
-    ["vendor-consolidation", "genConsolidation" as const],
-    ["savings", "genSavings" as const],
-  ])("returns %s with source openai when OPENAI_API_KEY is configured", async (type) => {
+  it("returns source openai for each insight type when OPENAI_API_KEY is configured", async () => {
     mocks.env.OPENAI_API_KEY = "sk_test_openai";
-    const res = await POST(
-      makeReq({ auditId: "a1", type }),
-      { params: Promise.resolve({}) }
-    );
-    expect(res.status).toBe(200);
-    expect((await res.json()).source).toBe("openai");
+    for (const type of ["insights", "summary", "vendor-consolidation", "savings"]) {
+      const res = await POST(
+        makeReq({ auditId: "a1", type }),
+        { params: Promise.resolve({}) }
+      );
+      expect(res.status).toBe(200);
+      expect((await res.json()).source).toBe("openai");
+    }
   });
 });

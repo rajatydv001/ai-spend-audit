@@ -138,7 +138,7 @@ export default function ReportsPage() {
         <p className="text-gray-400 mt-1">
           Export and manage your audit reports
           {entitlements &&
-            ` · ${entitlements.export.remaining} of ${entitlements.export.limit} exports left this month`}
+            ` · ${entitlements.export.remaining} of ${entitlements.export.limit} exports left in the last 30 days`}
         </p>
       </motion.div>
 

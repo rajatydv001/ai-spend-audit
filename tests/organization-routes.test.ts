@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   requireUserId: vi.fn(),
   requireOrgPermission: vi.fn(),
   requireOrgMembership: vi.fn(),
+  assertFeature: vi.fn(),
   createOrganization: vi.fn(),
   getOrganization: vi.fn(),
   getCurrentOrganization: vi.fn(),
@@ -14,12 +15,17 @@ const mocks = vi.hoisted(() => ({
   declineInvite: vi.fn(),
   listPendingInvites: vi.fn(),
   sendInviteEmail: vi.fn(),
+  createDepartment: vi.fn(),
+  getDepartments: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/dal", () => ({ requireUserId: mocks.requireUserId }));
 vi.mock("@/lib/auth/authorization", () => ({
   requireOrgPermission: mocks.requireOrgPermission,
   requireOrgMembership: mocks.requireOrgMembership,
+}));
+vi.mock("@/lib/services/entitlements", () => ({
+  assertFeature: mocks.assertFeature,
 }));
 vi.mock("@/lib/services/organization-service", () => ({
   createOrganization: mocks.createOrganization,
@@ -31,6 +37,8 @@ vi.mock("@/lib/services/organization-service", () => ({
   acceptInvite: mocks.acceptInvite,
   declineInvite: mocks.declineInvite,
   listPendingInvites: mocks.listPendingInvites,
+  createDepartment: mocks.createDepartment,
+  getDepartments: mocks.getDepartments,
 }));
 vi.mock("@/lib/services/notification-service", () => ({
   sendInviteEmail: mocks.sendInviteEmail,
@@ -50,6 +58,7 @@ import { GET as InvitesGET } from "@/app/api/organization/invite/route";
 import { POST as DeclinePOST } from "@/app/api/organization/invite/decline/route";
 import { POST as AcceptPOST } from "@/app/api/organization/invite/accept/route";
 import { GET as CurrentGET } from "@/app/api/organization/current/route";
+import { GET as DepartmentsGET, POST as DepartmentsPOST } from "@/app/api/organization/departments/route";
 
 const asJSON = (body: unknown, method: string, path: string) =>
   new Request(`http://localhost${path}`, {
@@ -63,6 +72,7 @@ beforeEach(() => {
   mocks.requireUserId.mockResolvedValue("u1");
   mocks.requireOrgPermission.mockResolvedValue({ role: "ADMIN", organizationId: "org-1" });
   mocks.requireOrgMembership.mockResolvedValue({ role: "ANALYST", organizationId: "org-1" });
+  mocks.assertFeature.mockResolvedValue({ plan: "PRO", features: { team: true } });
   mocks.getCurrentOrganization.mockResolvedValue({ org: { id: "org-1", name: "Acme" }, role: "ADMIN", userId: "u1" });
   mocks.sendInviteEmail.mockResolvedValue({ status: "not_configured" });
 });
@@ -275,5 +285,61 @@ describe("invite accept/decline routes", () => {
     const res = await DeclinePOST(asJSON({ token: "" }, "POST", "/api/organization/invite/decline"));
     expect(res.status).toBe(400);
     expect(mocks.declineInvite).not.toHaveBeenCalled();
+  });
+});
+
+describe("team entitlement gate on organization routes", () => {
+  it("consults the team entitlement on org create after auth (403 when not entitled)", async () => {
+    mocks.assertFeature.mockRejectedValueOnce(new ApiError("Team collaboration requires the Pro plan. Upgrade to enable it.", 403));
+    const res = await OrgPOST(asJSON({ name: "Acme" }, "POST", "/api/organization"));
+    expect(res.status).toBe(403);
+    expect(mocks.createOrganization).not.toHaveBeenCalled();
+  });
+
+  it("consults the team entitlement on member invite after membership permission", async () => {
+    mocks.assertFeature.mockRejectedValueOnce(new ApiError("Team collaboration requires the Pro plan. Upgrade to enable it.", 403));
+    const res = await MembersPOST(asJSON({ orgId: "org-1", email: "a@b.com", role: "ANALYST" }, "POST", "/api/organization/members"));
+    expect(res.status).toBe(403);
+    expect(mocks.inviteMember).not.toHaveBeenCalled();
+  });
+
+  it("enforces membership permission even for an entitled user (authz before entitlement)", async () => {
+    mocks.requireOrgPermission.mockRejectedValueOnce(new ApiError("Insufficient permissions", 403));
+    const res = await MembersPOST(asJSON({ orgId: "org-other", email: "a@b.com", role: "ANALYST" }, "POST", "/api/organization/members"));
+    expect(res.status).toBe(403);
+    expect(mocks.assertFeature).not.toHaveBeenCalled();
+  });
+});
+
+describe("departments routes", () => {
+  it("creates a department when entitled and permitted", async () => {
+    mocks.createDepartment.mockResolvedValue({ id: "d1", name: "Engineering", organizationId: "org-1" });
+    const res = await DepartmentsPOST(asJSON({ orgId: "org-1", name: "Engineering" }, "POST", "/api/organization/departments"));
+    expect(res.status).toBe(201);
+    expect(mocks.createDepartment).toHaveBeenCalledWith("org-1", "Engineering", "u1");
+  });
+
+  it("blocks department creation when not team-entitled", async () => {
+    mocks.assertFeature.mockRejectedValueOnce(new ApiError("Team collaboration requires the Pro plan. Upgrade to enable it.", 403));
+    const res = await DepartmentsPOST(asJSON({ orgId: "org-1", name: "Engineering" }, "POST", "/api/organization/departments"));
+    expect(res.status).toBe(403);
+  });
+
+  it("lists departments for a member when team-entitled", async () => {
+    mocks.getDepartments.mockResolvedValue([{ id: "d1", name: "Engineering", organizationId: "org-1" }]);
+    const res = await DepartmentsGET(new Request("http://localhost/api/organization/departments?orgId=org-1"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toHaveLength(1);
+  });
+
+  it("requires an orgId for the departments GET (400)", async () => {
+    const res = await DepartmentsGET(new Request("http://localhost/api/organization/departments"));
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects departments GET when not team-entitled", async () => {
+    mocks.assertFeature.mockRejectedValueOnce(new ApiError("Team collaboration requires the Pro plan. Upgrade to enable it.", 403));
+    const res = await DepartmentsGET(new Request("http://localhost/api/organization/departments?orgId=org-1"));
+    expect(res.status).toBe(403);
   });
 });

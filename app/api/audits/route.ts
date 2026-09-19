@@ -31,6 +31,9 @@ export const POST = withErrorHandling(async (request: Request) => {
   const data = await parseBody(request, createAuditInputSchema);
   // Plan limit and audit creation happen atomically server-side; the client can
   // neither choose the plan nor slip past the limit with concurrent requests.
+  // Duplicate tool rows within the request are merged engine-side (see
+  // lib/audit-engine.ts), so no 409 "already saved" is needed: re-running an
+  // identical tool set deliberately creates a fresh, timestamped audit.
   const audit = await createAuditWithinLimit(userId, data, orgId || undefined);
 
   await createAuditLog({

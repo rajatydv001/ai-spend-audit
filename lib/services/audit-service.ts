@@ -90,7 +90,7 @@ export async function createAuditWithinLimit(
     });
     if (used >= limit) {
       throw new PlanLimitError(
-        `Audit limit reached (${limit} audits per month on your plan). Upgrade to run more audits.`,
+        `Audit limit reached (${limit} audits in any 30-day period on your plan). Upgrade to run more audits.`,
         "audit"
       );
     }

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { staggerContainer, staggerItem } from "@/lib/motion-variants";
 import toast from "react-hot-toast";
+import UpgradeCard from "@/components/plan/upgrade-card";
 
 interface OrgMember {
   id: string;
@@ -53,6 +54,7 @@ export default function TeamPage() {
   const [lastInvite, setLastInvite] = useState<LastInvite | null>(null);
   const [orgName, setOrgName] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
+  const [entitled, setEntitled] = useState<boolean | null>(null);
 
   const isAdmin = myRole === "ADMIN";
 
@@ -78,6 +80,27 @@ export default function TeamPage() {
       setInvites(await fetchInvites(data.org.id));
     }
   }, [fetchOrg, fetchInvites]);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Server-side enforcement is what protects this surface; the page mirrors
+    // it so a FREE user is shown the upgrade path instead of doomed requests.
+    const load = async () => {
+      try {
+        const res = await fetch("/api/entitlements");
+        const data = res.ok ? await res.json() : null;
+        if (cancelled) return;
+        setEntitled(data?.features?.team === true);
+      } catch {
+        if (cancelled) return;
+        setEntitled(null);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -186,6 +209,28 @@ export default function TeamPage() {
       toast.error("Failed to remove member");
     }
   };
+
+  if (entitled === false) {
+    return (
+      <motion.div
+        variants={staggerContainer}
+        initial="hidden"
+        animate="visible"
+        className="p-6 space-y-8"
+      >
+        <motion.div variants={staggerItem}>
+          <h1 className="text-3xl font-bold text-white">Team</h1>
+          <p className="text-gray-400 mt-1">Invite collaborators and manage your organization</p>
+        </motion.div>
+        <motion.div variants={staggerItem}>
+          <UpgradeCard
+            title="Team collaboration is a Pro feature"
+            description="Invite teammates, manage roles, share audits, and organize by department on the Pro plan. The server enforces this entitlement — this page just shows you where to unlock it."
+          />
+        </motion.div>
+      </motion.div>
+    );
+  }
 
   if (loading) {
     return (

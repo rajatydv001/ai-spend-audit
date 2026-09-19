@@ -38,6 +38,34 @@ describe("createAuditLog", () => {
     });
   });
 
+  it("normalizes the anonymous sentinel to null before inserting (no FK phantom user)", async () => {
+    create.mockResolvedValue({ id: "log-anon" });
+    await createAuditLog({
+      userId: "anonymous",
+      action: "auth.signup_duplicate",
+      entity: "user",
+      metadata: "{}",
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        userId: null,
+        action: "auth.signup_duplicate",
+        entity: "user",
+        metadata: "{}",
+      },
+    });
+  });
+
+  it("omits userId entirely when none is provided", async () => {
+    create.mockResolvedValue({ id: "log-noactor" });
+    await createAuditLog({ action: "user.login", entity: "auth" });
+
+    const data = create.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty("userId");
+    expect(data.action).toBe("user.login");
+  });
+
   it("never throws when the write fails (audit logging is best-effort)", async () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     create.mockRejectedValue(new Error("db down"));

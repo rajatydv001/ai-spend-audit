@@ -137,7 +137,7 @@ describe("signup", () => {
     );
 
     expect(mocks.auditLogCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ action: "user.created", entityId: "u1" }) })
+      expect.objectContaining({ data: expect.objectContaining({ action: "user.created", entityId: "u1", userId: "u1" }) })
     );
   });
 
@@ -151,8 +151,12 @@ describe("signup", () => {
     expect(JSON.stringify(res)).not.toMatch(/already exists|registered/i);
     expect(mocks.userCreate).not.toHaveBeenCalled();
     expect(mocks.createSession).not.toHaveBeenCalled();
+    expect(mocks.organizationCreate).not.toHaveBeenCalled();
+    expect(mocks.sessionCreate).not.toHaveBeenCalled();
+    // The anonymized audit event must persist (createAuditLog normalizes the
+    // "anonymous" sentinel to a NULL actor so the FK never rejects it).
     expect(mocks.auditLogCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ action: "auth.signup_duplicate" }) })
+      expect.objectContaining({ data: expect.objectContaining({ action: "auth.signup_duplicate", userId: null }) })
     );
   });
 
@@ -206,7 +210,7 @@ describe("login", () => {
     expect(mocks.sessionCreate).toHaveBeenCalled();
     expect(redirect).toHaveBeenCalledWith("/dashboard");
     expect(mocks.auditLogCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ action: "user.login" }) })
+      expect.objectContaining({ data: expect.objectContaining({ action: "user.login", userId: "u1" }) })
     );
   });
 
@@ -221,8 +225,10 @@ describe("login", () => {
 
     expect(res?.errors?._form?.[0]).toBe("Invalid email or password");
     expect(mocks.createSession).not.toHaveBeenCalled();
+    // The wrong-password branch knows the actor's real id, so the audit row
+    // keeps it (audit attribution for a known account).
     expect(mocks.auditLogCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ action: "auth.login_failed" }) })
+      expect.objectContaining({ data: expect.objectContaining({ action: "auth.login_failed", userId: "u1" }) })
     );
   });
 
@@ -276,6 +282,12 @@ describe("login", () => {
 
     expect(unknown?.errors?._form?.[0]).toBe("Invalid email or password");
     expect(wrongPw?.errors?._form?.[0]).toBe(unknown?.errors?._form?.[0]);
+    // Unknown email is an anonymous event: it must still persist, with a NULL
+    // actor (no phantom FK), so the audit trail survives without identifying
+    // the email as unknown.
+    expect(mocks.auditLogCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ action: "auth.login_failed", userId: null }) })
+    );
   });
 
   it("never leaks password material from any returned form state", async () => {

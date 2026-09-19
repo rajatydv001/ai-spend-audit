@@ -29,8 +29,14 @@ export async function createAuditLog(params: {
   ipAddress?: string;
   departmentId?: string;
 }) {
+  // `userId` is a foreign key into User.id. Anonymous events (duplicate signup,
+  // failed login) pass the sentinel "anonymous", which references no real row
+  // and would raise P2003, silently dropping the event. Normalize it to NULL
+  // (no actor) so the event always persists without weakening the FK.
+  const { userId, ...rest } = params;
+  const actor = userId === undefined ? {} : { userId: userId === "anonymous" ? null : userId };
   try {
-    await prisma.auditLog.create({ data: params });
+    await prisma.auditLog.create({ data: { ...rest, ...actor } });
   } catch {
     console.error("Audit log write failed:", params.action);
   }

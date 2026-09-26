@@ -41,6 +41,7 @@ import {
   sendOptimizationReminder,
   saveNotificationPreference,
   sendInviteEmail,
+  sendPasswordResetEmail,
 } from "@/lib/services/notification-service";
 
 const logCreate = prisma.notificationLog.create as ReturnType<typeof vi.fn>;
@@ -188,6 +189,35 @@ describe("sendInviteEmail", () => {
     envMock.RESEND_API_KEY = "key";
     resendSend.mockRejectedValue(new Error("provider down"));
     const result = await sendInviteEmail(args);
+    expect(result.status).toBe("delivery_failed");
+  });
+});
+
+describe("sendPasswordResetEmail", () => {
+  const args = { to: "owner@example.com", resetUrl: "http://localhost:3000/reset-password?token=abc123" };
+
+  it("returns not_configured and never sends when the Resend key is missing", async () => {
+    const result = await sendPasswordResetEmail(args);
+    expect(result.status).toBe("not_configured");
+    expect(resendSend).not.toHaveBeenCalled();
+  });
+
+  it("sends the reset email with the single-use URL when Resend is configured", async () => {
+    envMock.RESEND_API_KEY = "key";
+    resendSend.mockResolvedValue({ id: "e1" });
+    const result = await sendPasswordResetEmail(args);
+    expect(result.status).toBe("sent");
+    expect(resendSend).toHaveBeenCalledTimes(1);
+    const call = resendSend.mock.calls[0][0] as { to: string; subject: string; html: string };
+    expect(call.to).toBe("owner@example.com");
+    expect(call.subject).toContain("Reset");
+    expect(call.html).toContain("http://localhost:3000/reset-password?token=abc123");
+  });
+
+  it("reports delivery_failed and never fakes success when the provider errors", async () => {
+    envMock.RESEND_API_KEY = "key";
+    resendSend.mockRejectedValue(new Error("smtp down"));
+    const result = await sendPasswordResetEmail(args);
     expect(result.status).toBe("delivery_failed");
   });
 });

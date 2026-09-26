@@ -2,14 +2,14 @@
 
 import { z } from "zod";
 import bcrypt from "bcryptjs";
-import { createHash } from "node:crypto";
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
-import { rateLimit, trustProxy } from "@/lib/services/rate-limit";
+import { rateLimit } from "@/lib/services/rate-limit";
 import { establishSession, revokeActiveSession } from "@/lib/services/session-service";
 import { createAuditLog } from "@/lib/services/audit-log";
 import { createOrganization } from "@/lib/services/organization-service";
+import { logAuth } from "@/lib/auth/auth-diag";
+import { emailKey, getRequestIp } from "@/lib/auth/request";
 
 const AuthSchema = z.object({
   email: z
@@ -36,23 +36,6 @@ const GENERIC_SIGNUP_ERROR = "We couldn't create your account. Please try again.
 // accounts; the account (email) bucket stops one account from being hammered —
 // including when the request carries useful forwarded headers but no distinct
 // IP (e.g. "anonymous"). Keys never contain the raw email, only its SHA-256.
-function emailKey(email: string): string {
-  return createHash("sha256").update(email).digest("hex");
-}
-
-async function getRequestIp(): Promise<string> {
-  const h = await headers();
-  if (trustProxy()) {
-    const forwarded = h.get("x-forwarded-for");
-    if (forwarded) {
-      const first = forwarded.split(",")[0]?.trim();
-      if (first) return first;
-    }
-    const realIp = h.get("x-real-ip");
-    if (realIp) return realIp;
-  }
-  return "anonymous";
-}
 
 /**
  * Accepts only same-site, relative redirect targets. This keeps flows like
@@ -100,16 +83,24 @@ export async function signupAction(
   const ip = await getRequestIp();
   const ipCheck = await rateLimit(`auth:signup:ip:${ip}`, 5, 15 * 60 * 1000);
   if (!ipCheck.ok) {
+    logAuth("signup_rate_limited", { status: "rejected", bucket: "ip" }, ip);
     return { errors: { _form: ["Too many signup attempts. Please try again later."] } };
   }
 
   if (!validated.success) {
+    logAuth("signup_invalid", { reason: "validation" }, ip);
     return { errors: validated.error.flatten().fieldErrors };
   }
 
   const { name, email, password } = validated.data;
 
-  const existing = await prisma.user.findUnique({ where: { email } });
+  let existing;
+  try {
+    existing = await prisma.user.findUnique({ where: { email } });
+  } catch (error) {
+    logAuth("signup_db_error", { reason: "db-failure" }, ip);
+    throw error;
+  }
   if (existing) {
     await createAuditLog({
       userId: "anonymous",
@@ -117,6 +108,7 @@ export async function signupAction(
       entity: "user",
       metadata: JSON.stringify({ email, reason: "email-already-registered" }),
     });
+    logAuth("signup_rejected", { reason: "duplicate", result: "generic" }, ip);
     return { errors: { _form: [GENERIC_SIGNUP_ERROR] } };
   }
 
@@ -143,8 +135,10 @@ export async function signupAction(
     // never crash, never confirm the email.
     const code = (error as { code?: string } | null)?.code;
     if (code === "P2002") {
+      logAuth("signup_rejected", { reason: "unique-race", result: "generic" }, ip);
       return { errors: { _form: [GENERIC_SIGNUP_ERROR] } };
     }
+    logAuth("signup_db_error", { reason: "db-insert" }, ip);
     throw error;
   }
 
@@ -154,7 +148,12 @@ export async function signupAction(
   // the least-privilege ANALYST role to an in-org ADMIN; platform admin is
   // never minted here. If this fails after the user row exists the request
   // throws (infra failure) rather than silently stranding the user.
-  await createOrganization(`${name.trim()} Workspace`, userId);
+  try {
+    await createOrganization(`${name.trim()} Workspace`, userId);
+  } catch (error) {
+    logAuth("signup_org_error", { reason: "org-creation" }, ip);
+    throw error;
+  }
 
   await createAuditLog({
     userId,
@@ -164,7 +163,12 @@ export async function signupAction(
     metadata: JSON.stringify({ email, provider: "email" }),
   });
 
-  await establishSession(userId);
+  try {
+    await establishSession(userId);
+  } catch (error) {
+    logAuth("signup_session_error", { reason: "session-creation" }, ip);
+    throw error;
+  }
   redirect(safeRedirectPath(formData.get("next")) ?? "/dashboard");
 }
 
@@ -184,6 +188,7 @@ export async function loginAction(
   // bucket is global, so one user's traffic cannot block unrelated users.
   const ipCheck = await rateLimit(`auth:login:ip:${ip}`, 20, 60 * 1000);
   if (!ipCheck.ok) {
+    logAuth("login_rate_limited", { status: "rejected", bucket: "ip" }, ip);
     return { errors: { _form: ["Too many login attempts. Please try again later."] } };
   }
   const rawEmail = String(formData.get("email") ?? "").trim().toLowerCase();
@@ -193,16 +198,24 @@ export async function loginAction(
     15 * 60 * 1000
   );
   if (!emailCheck.ok) {
+    logAuth("login_rate_limited", { status: "rejected", bucket: "email" }, ip);
     return { errors: { _form: ["Too many login attempts. Please try again later."] } };
   }
 
   if (!validated.success) {
+    logAuth("login_invalid", { reason: "validation" }, ip);
     return { errors: validated.error.flatten().fieldErrors };
   }
 
   const { email, password } = validated.data;
 
-  const user = await prisma.user.findUnique({ where: { email } });
+  let user;
+  try {
+    user = await prisma.user.findUnique({ where: { email } });
+  } catch (error) {
+    logAuth("login_db_error", { reason: "db-failure" }, ip);
+    throw error;
+  }
   if (!user?.passwordHash) {
     await createAuditLog({
       userId: "anonymous",
@@ -210,10 +223,17 @@ export async function loginAction(
       entity: "user",
       metadata: JSON.stringify({ email, reason: "no-account" }),
     });
+    logAuth("login_rejected", { reason: "no-account", result: "generic" }, ip);
     return { errors: { _form: ["Invalid email or password"] } };
   }
 
-  const passwordValid = await bcrypt.compare(password, user.passwordHash);
+  let passwordValid: boolean;
+  try {
+    passwordValid = await bcrypt.compare(password, user.passwordHash);
+  } catch (error) {
+    logAuth("login_db_error", { reason: "verify-failure" }, ip);
+    throw error;
+  }
   if (!passwordValid) {
     await createAuditLog({
       userId: user.id,
@@ -222,6 +242,7 @@ export async function loginAction(
       entityId: user.id,
       metadata: JSON.stringify({ email, reason: "bad-password" }),
     });
+    logAuth("login_rejected", { reason: "password-mismatch", result: "generic" }, ip);
     return { errors: { _form: ["Invalid email or password"] } };
   }
 
@@ -232,13 +253,23 @@ export async function loginAction(
     entityId: user.id,
   });
 
-  await establishSession(user.id);
+  try {
+    await establishSession(user.id);
+  } catch (error) {
+    logAuth("login_session_error", { reason: "session-creation" }, ip);
+    throw error;
+  }
   redirect(safeRedirectPath(formData.get("next")) ?? "/dashboard");
 }
 
 export async function logoutAction(): Promise<void> {
   // Invalidate the server-side session record first, then clear the cookie, so
   // a replayed old cookie is rejected by requireUserId/getSessionUser.
-  await revokeActiveSession();
+  try {
+    await revokeActiveSession();
+  } catch (error) {
+    logAuth("logout_error", { reason: "revoke-failure" });
+    throw error;
+  }
   redirect("/login");
 }

@@ -14,6 +14,8 @@ export type AuditAction =
   | "user.login"
   | "auth.signup_duplicate"
   | "auth.login_failed"
+  | "auth.password_reset_requested"
+  | "auth.password_reset"
   | "organization.created"
   | "organization.updated"
   | "subscription.changed"

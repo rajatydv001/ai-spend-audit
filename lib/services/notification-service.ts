@@ -114,6 +114,63 @@ export async function sendInviteEmail(args: {
   }
 }
 
+export type PasswordResetEmailStatus = "sent" | "not_configured" | "delivery_failed";
+
+/**
+ * Delivers a password-reset link to the account owner.
+ *
+ * Honest delivery reporting, mirroring sendInviteEmail: without a configured
+ * provider the caller is told `not_configured` (they must NOT claim otherwise).
+ * Unlike invites, the reset link is printed to the server console ONLY outside
+ * production, so local/CI testing can follow the flow manually without ever
+ * leaking a live reset link into production logs; production only ever sends
+ * via the configured provider or reports the outage.
+ */
+export async function sendPasswordResetEmail(args: {
+  to: string;
+  resetUrl: string;
+}): Promise<{ status: PasswordResetEmailStatus }> {
+  if (!env.RESEND_API_KEY) {
+    if (process.env.NODE_ENV !== "production") {
+      console.log(
+        "[email] RESEND_API_KEY is not configured; password-reset link delivered to the dev console for manual testing ONLY:\n" +
+          args.resetUrl
+      );
+    } else {
+      console.error(
+        "[email] RESEND_API_KEY is not configured; password-reset email NOT sent to " +
+          args.to +
+          ". Configure RESEND_API_KEY to enable account recovery."
+      );
+    }
+    return { status: "not_configured" };
+  }
+
+  try {
+    const { Resend } = await import("resend");
+    const resend = new Resend(env.RESEND_API_KEY);
+    await resend.emails.send({
+      from: "AI Spend Audit <noreply@ai-spend-audit.com>",
+      to: args.to,
+      subject: "Reset your AI Spend Audit password",
+      html: `
+        <h2>Reset your password</h2>
+        <p>We received a request to reset the password for <strong>${args.to}</strong>.</p>
+        <p>This link expires in 15 minutes and can be used once:</p>
+        <p><a href="${args.resetUrl}">Reset your password</a></p>
+        <p>If the button does not work, copy and paste this link into your browser:</p>
+        <p><a href="${args.resetUrl}">${args.resetUrl}</a></p>
+        <p>If you did not request this, you can safely ignore this email — your password will not change.</p>
+        <p style="color:#888;font-size:12px">AI Spend Audit — AI cost optimization for your teams.</p>
+      `,
+    });
+    return { status: "sent" };
+  } catch (error) {
+    console.error("Failed to send password-reset email:", error);
+    return { status: "delivery_failed" };
+  }
+}
+
 export async function sendWeeklyDigest(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },

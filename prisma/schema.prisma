@@ -59,6 +59,7 @@ model User {
   receivedInvites  Invite[]          @relation("ReceivedInvites")
   auditLogs        AuditLog[]
   sessions         Session[]
+  passwordResetTokens PasswordResetToken[]
 }
 
 model Organization {
@@ -200,6 +201,24 @@ model Session {
   tokenHash String    @unique
   expiresAt DateTime
   revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// Single-use, short-lived password-reset credentials. Only a one-way SHA-256
+// hash of the random token is persisted (like Session.tokenHash); the raw token
+// is delivered to the account owner's email and never stored. The row is marked
+// used atomically with the password update, so a token can be redeemed exactly
+// once. Any reset for a user invalidates their earlier outstanding tokens.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
   createdAt DateTime  @default(now())
 
   @@index([userId])

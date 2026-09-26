@@ -31,7 +31,9 @@ function NextInput({ value }: { value: string }) {
 
 export function LoginForm() {
   const [state, action, pending] = useActionState(loginAction, undefined);
-  const next = useSearchParams().get("next") ?? "";
+  const params = useSearchParams();
+  const next = params.get("next") ?? "";
+  const resetDone = params.get("reset") === "1";
 
   return (
     <div>
@@ -42,6 +44,11 @@ export function LoginForm() {
 
       <form action={action} className="mt-8 space-y-4">
         <NextInput value={next} />
+        {resetDone && (
+          <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+            Your password was reset. Sign in with your new password.
+          </div>
+        )}
         {state?.errors?._form && (
           <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             {state.errors._form[0]}
@@ -80,6 +87,14 @@ export function LoginForm() {
           <FieldError>
             <ErrorList messages={state?.errors?.password} />
           </FieldError>
+          <div className="mt-1 text-right">
+            <Link
+              href={`/forgot-password${next ? `?next=${encodeURIComponent(next)}` : ""}`}
+              className="text-sm text-gray-500 hover:text-gray-300"
+            >
+              Forgot password?
+            </Link>
+          </div>
         </div>
 
         <button

@@ -51,6 +51,7 @@ vi.mock("@/lib/db", () => ({
     $transaction: mocks.$transaction,
     user: { findUnique: mocks.findUnique },
     audit: { count: mocks.auditCount, create: mocks.auditCreate, findFirst: mocks.auditFindFirst },
+    organization: { findUnique: vi.fn().mockResolvedValue({ name: "Acme Test" }) },
     savedReport: { count: mocks.savedReportCount, create: mocks.savedReportCreate },
     auditLog: { create: mocks.auditLogCreate },
   },

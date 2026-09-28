@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   findFirst: vi.fn(),
   auditCount: vi.fn(),
   userFindUnique: vi.fn(),
+  organizationFindUnique: vi.fn(),
   savedReportCount: vi.fn(),
   savedReportCreate: vi.fn(),
 }));
@@ -42,6 +43,7 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     audit: { findFirst: mocks.findFirst, count: mocks.auditCount },
     user: { findUnique: mocks.userFindUnique },
+    organization: { findUnique: mocks.organizationFindUnique },
     savedReport: { count: mocks.savedReportCount, create: mocks.savedReportCreate },
   },
 }));
@@ -99,6 +101,8 @@ beforeEach(() => {
   mocks.generatePdfReport.mockResolvedValue(pdfBlob());
   mocks.createAuditLog.mockReset();
   mocks.createAuditLog.mockResolvedValue(undefined);
+  mocks.organizationFindUnique.mockReset();
+  mocks.organizationFindUnique.mockResolvedValue({ name: "Acme Test" });
   // FREE plan by default: exportLimit 3, nothing used yet.
   mocks.userFindUnique.mockResolvedValue({ id: "user-A", subscription: null });
   mocks.auditCount.mockResolvedValue(0);
@@ -115,11 +119,29 @@ describe("POST /api/reports/export — HTTP-level authorization (IDOR)", () => {
     const res = await POST(exportRequest("audit-a1"), ctx);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/pdf");
+    expect(mocks.generatePdfReport).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ organizationName: "Acme Test", reportId: "audit-a1" })
+    );
     expect(mocks.savedReportCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ userId: "user-A", auditId: "audit-a1" }),
       })
     );
+  });
+
+  it("rebuilds savingsRate as the 0-100 percentage the engine defines (regression: 0.2 not 20)", async () => {
+    mocks.requireUserId.mockResolvedValue("user-A");
+    mocks.requireUserOrg.mockResolvedValue({ id: "user-A", organizationId: "org-A" });
+    mocks.findFirst.mockResolvedValue(auditOwnedByA);
+
+    const res = await POST(exportRequest("audit-a1"), ctx);
+    expect(res.status).toBe(200);
+
+    // auditOwnedByA: $300 current, $60 savings → 20%.
+    const result = mocks.generatePdfReport.mock.calls[0]?.[0];
+    expect(result.savingsRate).toBe(20);
+    expect(result.savingsRate).not.toBe(0.2);
   });
 
   it("User B cannot export User A's audit through the route (cross-org IDOR → 404)", async () => {

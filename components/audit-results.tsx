@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { staggerContainer, staggerItem } from "@/lib/motion-variants";
 import type { AggregateAuditResult } from "@/lib/audit-engine";
+import { formatSavingsRatePercent } from "@/components/savings-rate-format";
 import Charts from "@/components/charts";
 import Badge from "@/components/ui/badge";
 
@@ -91,7 +92,7 @@ export default function AuditResults({ result }: AuditResultsProps) {
             </div>
             <div className="mt-4">
               <p className="text-4xl font-bold text-emerald-400">${result.totalAnnualSavings}</p>
-              <p className="mt-2 text-xs text-emerald-300/80">{Math.round(result.savingsRate * 100)}% savings rate</p>
+              <p className="mt-2 text-xs text-emerald-300/80">{formatSavingsRatePercent(result.savingsRate)}% savings rate</p>
             </div>
           </div>
         </div>

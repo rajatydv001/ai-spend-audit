@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth/dal";
 import { requireUserOrg, requireRole } from "@/lib/auth/authorization";
+import { prisma } from "@/lib/db";
 import { getAuditById } from "@/lib/services/audit-service";
 import { getUserEntitlements, PlanLimitError } from "@/lib/services/entitlements";
 import { AUDIT_LIMIT_WINDOW_MS } from "@/lib/features/plan-config";
@@ -74,7 +75,9 @@ export function auditRowToResult(audit: {
     overallOptimizationScore: score,
     priorityRecommendations: tools.filter((t) => t.savings > 0).map((t) => t.recommendation),
     summary: audit.summary ?? "",
-    savingsRate: totalCurrentSpend > 0 ? totalSavings / totalCurrentSpend : 0,
+    // savingsRate is a 0-100 percentage in AggregateAuditResult, matching the
+    // engine. Rebuilding it as a 0-1 fraction here made the PDF print "0%".
+    savingsRate: totalCurrentSpend > 0 ? Math.round((totalSavings / totalCurrentSpend) * 100) : 0,
     teamEfficiencyScore: score,
     enhancedRecommendations: [],
   };
@@ -105,7 +108,16 @@ export const POST = withErrorHandling(async (request: Request) => {
 
   let pdfBytes: Uint8Array<ArrayBuffer>;
   try {
-    const blob = await generatePdfReport(auditRowToResult(audit));
+    const organization = user.organizationId
+      ? await prisma.organization.findUnique({
+          where: { id: user.organizationId },
+          select: { name: true },
+        })
+      : null;
+    const blob = await generatePdfReport(auditRowToResult(audit), {
+      organizationName: organization?.name,
+      reportId: audit.id,
+    });
     pdfBytes = new Uint8Array(await blob.arrayBuffer());
   } catch (error) {
     console.error("[reports/export] PDF generation failed:", error);

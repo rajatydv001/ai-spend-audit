@@ -28,16 +28,42 @@ export function hashSessionToken(sid: string): string {
  * therefore revocable server-side.
  */
 export async function establishSession(userId: string): Promise<void> {
-  const sid = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
-  await prisma.session.create({
+  const sid = newSessionId();
+  const expiresAt = sessionExpiry();
+  await persistSessionRecord(prisma, userId, sid, expiresAt);
+  await createSession(userId, sid);
+}
+
+/** A cryptographically random session id. Only its SHA-256 hash is ever stored. */
+export function newSessionId(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+export function sessionExpiry(): Date {
+  return new Date(Date.now() + SESSION_DURATION_MS);
+}
+
+/**
+ * Persists the revocable server-side session record through the given client.
+ *
+ * Split out from `establishSession` so signup can commit the session ROW inside
+ * the same transaction as the user and workspace, and set the cookie only after
+ * that transaction commits. Writing the cookie inside the transaction would let a
+ * rollback leave a live cookie pointing at an account that does not exist.
+ */
+export async function persistSessionRecord(
+  client: { session: { create: (args: never) => Promise<unknown> } },
+  userId: string,
+  sid: string,
+  expiresAt: Date
+): Promise<void> {
+  await (client.session.create as (args: unknown) => Promise<unknown>)({
     data: {
       userId,
       tokenHash: hashSessionToken(sid),
       expiresAt,
     },
   });
-  await createSession(userId, sid);
 }
 
 /**

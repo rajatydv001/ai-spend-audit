@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   sessionCreate: vi.fn(),
   sessionFindUnique: vi.fn(),
   sessionUpdateMany: vi.fn(),
+  $transaction: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/session", () => ({
@@ -29,6 +30,20 @@ vi.mock("@/lib/auth/session", () => ({
   deleteSession: mocks.deleteSession,
   getSession: mocks.getSession,
 }));
+
+// Transactional client used by the default $transaction implementation. It
+// delegates to the same flat model mocks so existing assertions still observe
+// every call, while letting the atomicity suite override individual models.
+const defaultTx = {
+  user: {
+    create: mocks.userCreate,
+    findUnique: mocks.userFindUnique,
+    update: mocks.userUpdate,
+  },
+  organization: { create: mocks.organizationCreate },
+  auditLog: { create: mocks.auditLogCreate },
+  session: { create: mocks.sessionCreate },
+};
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -44,6 +59,7 @@ vi.mock("@/lib/db", () => ({
       findUnique: mocks.sessionFindUnique,
       updateMany: mocks.sessionUpdateMany,
     },
+    $transaction: mocks.$transaction,
   },
 }));
 
@@ -74,6 +90,15 @@ const loginForm = (over: Partial<{ email: string; password: string; next: string
   return form;
 };
 
+// Signup now commits inside a single transaction. Every describe gets a working
+// $transaction passthrough by default; the atomicity suite overrides it with a
+// real commit/rollback store.
+beforeEach(() => {
+  mocks.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+    fn(defaultTx)
+  );
+});
+
 describe("signup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -81,6 +106,11 @@ describe("signup", () => {
     ipState.value = "203.0.113.100";
     mocks.userFindUnique.mockResolvedValue(null);
     mocks.userCreate.mockResolvedValue({ id: "u1" });
+    // Signup now runs inside one transaction; pass the shared proxy straight
+    // through so the flat mocks above still record every call.
+    mocks.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn(defaultTx)
+    );
   });
 
   it("creates a user with normalized email, bcrypt hash, a personal workspace it owns, and starts a session", async () => {
@@ -177,7 +207,10 @@ describe("signup", () => {
   it("handles a concurrent same-email signup (unique-constraint race) as a generic failure", async () => {
     mocks.userFindUnique.mockResolvedValue(null);
     mocks.userCreate.mockRejectedValue(
-      Object.assign(new Error("Unique constraint failed"), { code: "P2002" })
+      Object.assign(new Error("Unique constraint failed"), {
+        code: "P2002",
+        meta: { target: ["email"] },
+      })
     );
 
     const res = await signupAction(undefined, signupForm());
@@ -185,6 +218,139 @@ describe("signup", () => {
     expect(mocks.auditLogCreate).not.toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ action: "user.created" }) })
     );
+  });
+
+  it("does not report a non-email unique collision as a duplicate account", async () => {
+    // A P2002 on some other target (e.g. a workspace slug) is a transient
+    // internal fault, not "this email is taken". Mislabelling it would send the
+    // user down the wrong path and mask the real fault.
+    mocks.userFindUnique.mockResolvedValue(null);
+    mocks.userCreate.mockRejectedValue(
+      Object.assign(new Error("Unique constraint failed"), {
+        code: "P2002",
+        meta: { target: ["Organization_slug_key"] },
+      })
+    );
+
+    await expect(signupAction(undefined, signupForm())).rejects.toThrow();
+  });
+});
+
+/**
+ * Regression: signup must be ALL-OR-NOTHING.
+ *
+ * The user row used to be committed BEFORE the workspace, audit log and session
+ * were created. Any failure in those later steps left an orphaned user with no
+ * organization — and because the email was then already taken, every retry hit
+ * the duplicate branch and showed the generic "We couldn't create your account"
+ * message forever. The user was permanently locked out of an account that
+ * looked like it had never been created, with an error that named the wrong
+ * cause.
+ *
+ * These tests drive a real in-memory commit/rollback store so the invariant
+ * (no half-created account survives a failure) is asserted, not just mocked.
+ */
+describe("signup atomicity", () => {
+  // Minimal committed-state store: mutations land here only when called on the
+  // transactional client, and $transaction truncates the store back to its
+  // entry snapshot if the callback throws.
+  let store: Array<{ id: string; email: string }>;
+  let seq: number;
+
+  const txUserCreate = async ({ data }: { data: { id?: string; email: string } }) => {
+    if (store.some((u) => u.email === data.email)) {
+      throw Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+    }
+    const row = { id: data.id ?? `u${++seq}`, email: data.email };
+    store.push(row);
+    return { id: row.id };
+  };
+
+  const txUserFindUnique = async ({ where }: { where: { email: string } }) =>
+    store.find((u) => u.email === where.email) ?? null;
+
+  const txClient = {
+    user: { create: txUserCreate, findUnique: txUserFindUnique, update: vi.fn(async () => ({})) },
+    organization: { create: vi.fn<[], Promise<{ id: string }>>(async () => ({ id: "org-1" })) },
+    auditLog: { create: vi.fn<[], Promise<unknown>>(async () => ({})) },
+    session: { create: vi.fn<[], Promise<unknown>>(async () => ({})) },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearRateLimits();
+    ipState.value = "203.0.113.99";
+    store = [];
+    seq = 0;
+
+    mocks.userCreate.mockImplementation(txUserCreate as never);
+    mocks.userFindUnique.mockImplementation(txUserFindUnique as never);
+    mocks.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+      const snapshot = [...store];
+      try {
+        return await fn(txClient);
+      } catch (error) {
+        store = snapshot; // rollback
+        throw error;
+      }
+    });
+  });
+
+  it("rolls the user row back when workspace creation fails, so a retry can still sign up", async () => {
+    mocks.organizationCreate.mockRejectedValue(new Error("organization insert failed"));
+    // The transactional client shares the same mocked organization model, so
+    // route the failure through it too.
+    txClient.organization.create = mocks.organizationCreate;
+
+    await expect(signupAction(undefined, signupForm())).rejects.toThrow(/organization insert failed/);
+
+    // The critical invariant: nothing half-created is left behind.
+    expect(store, "a failed signup must not leave a committed user row").toEqual([]);
+    expect(mocks.sessionCreate).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+
+    // The user's real experience: the retry must succeed instead of being told
+    // "we couldn't create your account" forever.
+    txClient.organization.create = vi.fn(async () => ({ id: "org-1" }));
+    mocks.organizationCreate.mockImplementation(txClient.organization.create as never);
+    const res = await signupAction(undefined, signupForm());
+
+    expect(res).toBeUndefined();
+    expect(redirect).toHaveBeenCalledWith("/dashboard");
+    expect(store).toHaveLength(1);
+    // The retry issues a session for the account it just created.
+    expect(mocks.createSession).toHaveBeenCalledWith(store[0].id, expect.any(String));
+  });
+
+  it("rolls back when the session record cannot be persisted", async () => {
+    txClient.organization.create = vi.fn(async () => ({ id: "org-1" }));
+    mocks.organizationCreate.mockImplementation(txClient.organization.create as never);
+    txClient.session.create = vi.fn<[], Promise<unknown>>(async () => {
+      throw new Error("session insert failed");
+    });
+
+    await expect(signupAction(undefined, signupForm())).rejects.toThrow(/session insert failed/);
+    expect(store, "a failed signup must not leave a committed user row").toEqual([]);
+    // The cookie must never be set for a session that was rolled back.
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("commits the workspace and session row before the cookie is set", async () => {
+    txClient.organization.create = vi.fn<[], Promise<{ id: string }>>(async () => ({ id: "org-1" }));
+    txClient.session.create = vi.fn<[], Promise<unknown>>(async () => undefined);
+
+    await signupAction(undefined, signupForm());
+
+    // Database state is durable: the session row is written through the
+    // transactional client...
+    expect(txClient.session.create).toHaveBeenCalledTimes(1);
+    expect(store).toHaveLength(1);
+    // ...and the cookie is set only afterwards, outside the transaction, so a
+    // rollback can never leave a live cookie pointing at a missing account.
+    const txFinished = mocks.$transaction.mock.invocationCallOrder[0];
+    const cookieSet = mocks.createSession.mock.invocationCallOrder[0];
+    expect(cookieSet).toBeGreaterThan(txFinished);
+    expect(mocks.createSession).toHaveBeenCalledWith(store[0].id, expect.any(String));
   });
 });
 

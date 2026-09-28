@@ -248,6 +248,10 @@ describe("P1-D plan gating — race-safe audit creation", () => {
     // Limit check and insert happen in the SAME transaction.
     expect(mocks.$transaction).toHaveBeenCalledWith(expect.any(Function), {
       isolationLevel: "Serializable",
+      // Explicit waits: the pooled serverless database can take longer than
+      // Prisma's 2s default to hand out a connection for a cold transaction.
+      maxWait: 10_000,
+      timeout: 10_000,
     });
   });
 
@@ -311,6 +315,8 @@ describe("P1-D plan gating — withSerializableTransaction", () => {
     expect(mocks.$transaction).toHaveBeenCalledTimes(4);
     expect(mocks.$transaction).toHaveBeenCalledWith(expect.any(Function), {
       isolationLevel: "Serializable",
+      maxWait: 10_000,
+      timeout: 10_000,
     });
   });
 

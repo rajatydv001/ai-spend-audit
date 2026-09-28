@@ -34,13 +34,35 @@ const INVITE_RETURN_FIELDS = {
   createdAt: true,
 } as const;
 
-export async function createOrganization(name: string, userId?: string) {
+/**
+ * The subset of the Prisma client this service needs. Callers already inside a
+ * transaction (signup) pass their transactional client so the workspace and the
+ * membership link commit atomically with the user row; everything else falls
+ * back to the global client.
+ */
+type OrganizationWriteClient = {
+  organization: {
+    create: (args: { data: Record<string, unknown> }) => Promise<{ id: string }>;
+  };
+  user: {
+    update: (args: {
+      where: { id: string };
+      data: Record<string, unknown>;
+    }) => Promise<unknown>;
+  };
+};
+
+export async function createOrganization(
+  name: string,
+  userId?: string,
+  client: OrganizationWriteClient = prisma as unknown as OrganizationWriteClient
+) {
   const slug = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "") + "-" + Math.random().toString(36).slice(2, 6);
 
-  const org = await prisma.organization.create({
+  const org = await client.organization.create({
     data: {
       name,
       slug,
@@ -49,7 +71,7 @@ export async function createOrganization(name: string, userId?: string) {
   });
 
   if (userId) {
-    await prisma.user.update({
+    await client.user.update({
       where: { id: userId },
       data: { organizationId: org.id, role: "ADMIN" },
     });

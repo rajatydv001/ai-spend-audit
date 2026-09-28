@@ -22,15 +22,25 @@ export type AuditAction =
   | "settings.updated"
   | "admin.action";
 
-export async function createAuditLog(params: {
-  userId?: string;
-  action: AuditAction;
-  entity: string;
-  entityId?: string;
-  metadata?: string;
-  ipAddress?: string;
-  departmentId?: string;
-}) {
+/** The subset of the Prisma client the audit log needs. */
+type AuditLogClient = {
+  auditLog: { create: (args: { data: Record<string, unknown> }) => Promise<unknown> };
+};
+
+export async function createAuditLog(
+  params: {
+    userId?: string;
+    action: AuditAction;
+    entity: string;
+    entityId?: string;
+    metadata?: string;
+    ipAddress?: string;
+    departmentId?: string;
+  },
+  // Signup passes its transaction client so the trail commits atomically with
+  // the account it describes. Defaults to the global client everywhere else.
+  client: AuditLogClient = prisma as unknown as AuditLogClient
+) {
   // `userId` is a foreign key into User.id. Anonymous events (duplicate signup,
   // failed login) pass the sentinel "anonymous", which references no real row
   // and would raise P2003, silently dropping the event. Normalize it to NULL
@@ -38,7 +48,7 @@ export async function createAuditLog(params: {
   const { userId, ...rest } = params;
   const actor = userId === undefined ? {} : { userId: userId === "anonymous" ? null : userId };
   try {
-    await prisma.auditLog.create({ data: { ...rest, ...actor } });
+    await client.auditLog.create({ data: { ...rest, ...actor } });
   } catch {
     console.error("Audit log write failed:", params.action);
   }
